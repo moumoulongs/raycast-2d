@@ -1,109 +1,86 @@
 #pragma once
+
 #include <cmath>
 
-struct vec2
-{
-    double x, y;
-	vec2(double x = 0, double y = 0)
-	{
-		this->x = x;
-		this->y = y;
-	}
-	
-	vec2 operator + (const vec2& v) const
-	{
-		return vec2
-		(
-			x + v.x,
-			y + v.y
-		);
-	}
-	
-	vec2 operator - (const vec2& v) const
-	{
-		return vec2
-		(
-			x - v.x,
-			y - v.y
-		);
-	}
-	
-	double operator * (const vec2& v) const
-	{
-		return x*v.x + y*v.y;
-	}
-	
-	vec2 operator * (double k) const
-	{
-		return vec2
-		(
-			k*x,
-			k*y
-		);
-	}
-	vec2 operator / (double k) const
-	{
-		return vec2
-		(
-			x/k,
-			y/k
-		);
-	}
-	
-	vec2& operator += (const vec2& v)
-	{
-		x += v.x;
-		y += v.y;
-	}
-	
-	vec2& operator -= (const vec2& v)
-	{
-		x -= v.x;
-		y -= v.y;
-	}
-	
-	vec2& operator *= (double k)
-	{
-		x *= k;
-		y *= k;
-	}
-	
-	vec2& operator /= (double k)
-	{
-		x /= k;
-		y /= k;
-	}
-	
-	vec2 operator - ()
-	{
-		x=-x;
-		y=-y;
-	}
-	
-	double magnitute2() const
-	{
-		return x*x + y*y;
-	}
-	
-	double magnitute() const
-	{
-		return sqrt(magnitute2());
-	}
-	
-	vec2& normalize()
-	{
-		double mag=magnitute();
-		(*this)/=mag;
-	}
+struct vec2 {
+    double x;
+    double y;
 
-	vec2 normalized()
-	{
-		double mag = magnitute();
-		return *this / mag;
-	}
+    constexpr vec2(double xValue = 0.0, double yValue = 0.0) : x(xValue), y(yValue) {}
+
+    constexpr vec2 operator+(const vec2& other) const {
+        return vec2(x + other.x, y + other.y);
+    }
+
+    constexpr vec2 operator-(const vec2& other) const {
+        return vec2(x - other.x, y - other.y);
+    }
+
+    constexpr double operator*(const vec2& other) const {
+        return x * other.x + y * other.y;
+    }
+
+    constexpr vec2 operator*(double scalar) const {
+        return vec2(x * scalar, y * scalar);
+    }
+
+    constexpr vec2 operator/(double scalar) const {
+        return vec2(x / scalar, y / scalar);
+    }
+
+    vec2& operator+=(const vec2& other) {
+        x += other.x;
+        y += other.y;
+        return *this;
+    }
+
+    vec2& operator-=(const vec2& other) {
+        x -= other.x;
+        y -= other.y;
+        return *this;
+    }
+
+    vec2& operator*=(double scalar) {
+        x *= scalar;
+        y *= scalar;
+        return *this;
+    }
+
+    vec2& operator/=(double scalar) {
+        x /= scalar;
+        y /= scalar;
+        return *this;
+    }
+
+    constexpr vec2 operator-() const {
+        return vec2(-x, -y);
+    }
+
+    constexpr double magnitudeSquared() const {
+        return x * x + y * y;
+    }
+
+    double magnitude() const {
+        return std::sqrt(magnitudeSquared());
+    }
+
+    vec2& normalize() {
+        const double length = magnitude();
+        if (length != 0.0) {
+            *this /= length;
+        }
+        return *this;
+    }
+
+    vec2 normalized() const {
+        const double length = magnitude();
+        if (length == 0.0) {
+            return vec2();
+        }
+        return *this / length;
+    }
 };
 
-vec2 operator * (double k, const vec2& v)
-{
-	return v*k;
+inline constexpr vec2 operator*(double scalar, const vec2& value) {
+    return value * scalar;
 }

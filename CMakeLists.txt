@@ -1,11 +1,28 @@
-cmake_minimum_required(VERSION 3.10)
-project(raycast-2d)
+cmake_minimum_required(VERSION 3.16)
 
-# 设置 C++ 标准
-set(CMAKE_CXX_STANDARD 11)
+project(raycast-2d LANGUAGES CXX)
 
-# 添加包含目录
-include_directories(include)
+set(RAYCAST_2D_SOURCES
+    src/app.cpp
+    src/camera.cpp
+    src/main.cpp
+    src/screen.cpp
+    src/world_map.cpp
+)
 
-# 添加子目录，即 src 目录
-add_subdirectory(src)
+if (WIN32)
+    list(APPEND RAYCAST_2D_SOURCES src/platform_terminal_windows.cpp)
+else()
+    list(APPEND RAYCAST_2D_SOURCES src/platform_terminal_posix.cpp)
+endif()
+
+add_executable(raycast-2d ${RAYCAST_2D_SOURCES})
+
+target_compile_features(raycast-2d PRIVATE cxx_std_17)
+target_include_directories(raycast-2d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+if (MSVC)
+    target_compile_options(raycast-2d PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(raycast-2d PRIVATE -Wall -Wextra -Wpedantic)
+endif()
