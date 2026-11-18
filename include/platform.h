@@ -16,4 +16,4 @@ public:
     virtual void present(const Screen& screen) = 0;
 };
 
-std::unique_ptr<Platform> createPlatform();
+std::unique_ptr<Platform> createPlatform(int fontHeight);

@@ -1,0 +1,22 @@
+; tile symbol elevation wallTexture(0=open) surfaceTexture
+tile # 0 1 3
+tile M 0 2 3
+tile . 0 0 3
+tile a 0.20 0 4
+tile b 0.40 0 4
+tile c 0.60 0 4
+tile d -0.20 0 3
+spawn 2.5 5.5 1 0
+prop 5 7.5 4.7 0.68 0.4
+prop 6 8.5 6.4 0.4 0.95
+row ################
+row #..............#
+row #...MMMM....dd.#
+row #...........dd.#
+row #....abcccc....#
+row #....abcccc....#
+row #....abcccc....#
+row #..............#
+row #..dd....MMM...#
+row #..dd..........#
+row ################

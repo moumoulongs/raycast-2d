@@ -1,0 +1,27 @@
+; Skyway: east along the upper route, south at the bend, west to the beacon.
+tile # 0 2 3
+tile ~ -3 0 3
+tile . 0 0 3
+tile a 0.15 0 4
+tile b 0.30 0 4
+tile c 0.45 0 4
+tile f 0.60 0 4
+spawn 3.0 4.0 1 0
+prop 5 23.5 5.5 0.65 0.4
+prop 6 3.2 12.0 0.6 1.4
+row ############################
+row #~~~~~~~~~~~~~~~~~~~~~~~~~~#
+row #.....~~~~~~~~~~~~~~~~~~~~~#
+row #.....~aaa~bbb~~~~~~~~~~~~~#
+row #.....~aaa~bbb~cccc~ccccc~~#
+row #.....~~~~~bbb~cccc~ccccc~~#
+row #~~~~~~~~~~~~~~~~~~~ccccc~~#
+row #~~~~~~~~~~~~~~~~~~~ccccc~~#
+row #~~~~~~~~~~~~~~~~~~~~~~~~~~#
+row #~~~~~~~~~~~~~~~~~~~~~bbb~~#
+row #~fff~~~~~ccc~~~~~aaa~bbb~~#
+row #~fff~ccc~ccc~bbb~aaa~~~~~~#
+row #~fff~ccc~ccc~bbb~aaa~~~~~~#
+row #~fff~ccc~~~~~~~~~~~~~~~~~~#
+row #~~~~~~~~~~~~~~~~~~~~~~~~~~#
+row ############################

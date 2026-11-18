@@ -6,24 +6,28 @@
 Screen::Screen(int width, int height)
     : width_(std::max(1, width)),
       height_(std::max(1, height)),
-      canvas_(static_cast<std::size_t>(width_ * height_), 0) {
+      canvas_(static_cast<std::size_t>(width_) * height_) {
     clear();
 }
 
 void Screen::clear() {
     for (int y = 0; y < height_; ++y) {
         for (int x = 0; x < width_; ++x) {
-            canvas_[static_cast<std::size_t>(y * width_ + x)] = (y >= height_ / 2) ? 15 : 0;
+            drawCell(x, y, ' ', DefaultColor);
         }
     }
 }
 
 void Screen::drawPoint(int x, int y, std::uint8_t luminance) {
+    drawCell(x, y, brightness(luminance), DefaultColor);
+}
+
+void Screen::drawCell(int x, int y, char glyph, unsigned char color) {
     if (x < 0 || y < 0 || x >= width_ || y >= height_) {
         return;
     }
 
-    canvas_[static_cast<std::size_t>(y * width_ + x)] = luminance;
+    canvas_[static_cast<std::size_t>(y) * width_ + x] = {glyph, std::min(color, DefaultColor)};
 }
 
 void Screen::drawLine(int x0, int y0, int x1, int y1, std::uint8_t luminance) {
@@ -71,27 +75,38 @@ char Screen::brightness(std::uint8_t value) {
     return kRamp[value * 18 / 256];
 }
 
+Screen::Cell Screen::framedCell(int x, int y) const {
+    if (x < 0 || y < 0 || x > width_ + 1 || y > height_ + 1) return {' ', DefaultColor};
+    const bool side = x == 0 || x == width_ + 1;
+    const bool end = y == 0 || y == height_ + 1;
+    if (side || end) return {side && end ? '+' : '@', DefaultColor};
+    return canvas_[static_cast<std::size_t>(y - 1) * width_ + x - 1];
+}
+
 std::string Screen::toDisplayString() const {
+    return formatFrame(false);
+}
+
+std::string Screen::toAnsiString() const {
+    return formatFrame(true);
+}
+
+std::string Screen::formatFrame(bool ansi) const {
     std::string frame;
-    frame.reserve(static_cast<std::size_t>((width_ + 3) * (height_ + 2)));
-
-    frame.push_back('+');
-    frame.append(static_cast<std::size_t>(width_), '@');
-    frame.push_back('+');
-    frame.push_back('\n');
-
-    for (int y = 0; y < height_; ++y) {
-        frame.push_back('@');
-        for (int x = 0; x < width_; ++x) {
-            frame.push_back(brightness(canvas_[static_cast<std::size_t>(y * width_ + x)]));
+    frame.reserve((static_cast<std::size_t>(width_) + 3) * (height_ + 2));
+    unsigned char previous = DefaultColor;
+    for (int y = 0; y < height_ + 2; ++y) {
+        if (y) frame.push_back('\n');
+        for (int x = 0; x < width_ + 2; ++x) {
+            const auto cell = framedCell(x, y);
+            if (ansi && previous != cell.color) {
+                const int code = cell.color == DefaultColor ? 39 :
+                                 (cell.color < 8 ? 30 : 90) + cell.color % 8;
+                frame += "\x1b[" + std::to_string(code) + 'm';
+                previous = cell.color;
+            }
+            frame.push_back(cell.glyph);
         }
-        frame.push_back('@');
-        frame.push_back('\n');
     }
-
-    frame.push_back('+');
-    frame.append(static_cast<std::size_t>(width_), '@');
-    frame.push_back('+');
-
     return frame;
 }

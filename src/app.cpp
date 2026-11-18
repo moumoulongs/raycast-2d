@@ -4,10 +4,10 @@
 #include <chrono>
 #include <thread>
 
-App::App(std::unique_ptr<Platform> platform)
+App::App(std::unique_ptr<Platform> platform, WorldMap map)
     : platform_(std::move(platform)),
-      worldMap_(),
-      camera_(),
+      worldMap_(std::move(map)),
+      camera_(worldMap_.spawnPosition(), worldMap_.spawnDirection()),
       screen_(platform_->width(), platform_->height()) {}
 
 int App::run() {
@@ -20,8 +20,9 @@ int App::run() {
         previous = start;
         const auto input = platform_->pollInput();
         if (input.exit) break;
-        if (input.turn) camera_.turn(input.turn * dt);
-        if (input.move) camera_.move(worldMap_, input.move * dt);
+        camera_.look(input.mouseX,input.mouseY);
+
+        camera_.advance(worldMap_, dt, input.move, input.jump, input.strafe);
 
         screen_.clear();
         camera_.render(worldMap_, screen_);

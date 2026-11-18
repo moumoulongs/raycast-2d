@@ -40,10 +40,11 @@ public:
         const ssize_t n = ::read(STDIN_FILENO, keys, sizeof(keys));
         for (ssize_t i = 0; i < n; ++i) {
             switch (keys[i]) {
+            case ' ': state.jump = true; break;
             case 'w': case 'W': state.move = 1; break;
             case 's': case 'S': state.move = -1; break;
-            case 'a': case 'A': state.turn = 1; break;
-            case 'd': case 'D': state.turn = -1; break;
+            case 'a': case 'A': state.strafe = 1; break;
+            case 'd': case 'D': state.strafe = -1; break;
             case 'q': case 'Q': case 27: state.exit = true; break;
             }
         }
@@ -51,7 +52,7 @@ public:
     }
 
     void present(const Screen& screen) override {
-        std::cout << "\x1b[H" << screen.toDisplayString() << std::flush;
+        std::cout << "\x1b[H" << screen.toAnsiString() << std::flush;
     }
 
 private:
@@ -84,7 +85,7 @@ private:
 
 } // namespace
 
-std::unique_ptr<Platform> createPlatform() {
+std::unique_ptr<Platform> createPlatform(int /*fontHeight*/) {
     return std::make_unique<PosixTerminalPlatform>();
 }
 

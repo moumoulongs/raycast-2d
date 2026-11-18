@@ -6,7 +6,11 @@ cmake --build out/play --config Release --target raycast-2d || goto fail
 if /i "%~1"=="--build-only" goto done
 set "game=out\play\raycast-2d.exe"
 if exist "out\play\Release\raycast-2d.exe" set "game=out\play\Release\raycast-2d.exe"
-"%game%"
+if "%~1"=="" (
+    "%game%" --config "assets\game.cfg"
+) else (
+    "%game%" %*
+)
 if errorlevel 1 goto fail
 :done
 popd

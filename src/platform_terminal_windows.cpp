@@ -14,18 +14,29 @@
 #include <string>
 #include <vector>
 #include <windows.h>
+#include "mouse_capture.h"
 
 namespace {
 
 class WindowsTerminalPlatform final : public Platform {
 public:
-    WindowsTerminalPlatform() {
-        configureTerminal();
+    explicit WindowsTerminalPlatform(int fontHeight) {
+        configureTerminal(fontHeight);
+        HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+        if (GetConsoleMode(in,&savedInputMode_))
+            mouseEnabled_ = SetConsoleMode(in,(savedInputMode_ | ENABLE_EXTENDED_FLAGS | ENABLE_MOUSE_INPUT) & ~ENABLE_QUICK_EDIT_MODE) != FALSE;
     }
 
     ~WindowsTerminalPlatform() override {
+        mouse_.release();
         std::cout << "\x1b[?25h" << std::flush;
-        if (fontChanged_) SetCurrentConsoleFontEx(GetStdHandle(STD_OUTPUT_HANDLE), FALSE, &originalFont_);
+        if (mouseEnabled_) SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE),savedInputMode_);
+        if (fontChanged_) {
+            const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+            SetConsoleWindowInfo(out, TRUE, &originalView_);
+            SetCurrentConsoleFontEx(out, FALSE, &originalFont_);
+            SetConsoleWindowInfo(out, TRUE, &originalView_);
+        }
     }
 
     int width() const override {
@@ -40,7 +51,8 @@ public:
         const HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
         DWORD pending = 0;
         bool quit = false;
-        bool pressed[4]{};
+        int dx = 0, dy = 0;
+        bool pressed[5]{};
         if (!GetNumberOfConsoleInputEvents(input, &pending)) return {0, 0, true};
         while (pending > 0) {
             INPUT_RECORD events[32];
@@ -51,34 +63,44 @@ public:
             for (DWORD i = 0; i < count; ++i) {
                 const auto& event = events[i];
                 if (event.EventType == FOCUS_EVENT && !event.Event.FocusEvent.bSetFocus) {
-                    std::fill_n(held_, 4, false);
-                    std::fill_n(pressed, 4, false);
+                    mouse_.release();
+                    dx = dy = 0;
+                    std::fill_n(held_, 5, false);
+                    std::fill_n(pressed, 5, false);
+                }
+                if (mouseEnabled_ && event.EventType == MOUSE_EVENT) {
+                    const auto& m = event.Event.MouseEvent;
+                    const bool down = (m.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED) != 0;
+                    if (down && m.dwEventFlags == 0) mouse_.acquire();
+                    continue;
                 }
                 if (event.EventType != KEY_EVENT) continue;
                 const auto& key = event.Event.KeyEvent;
                 int slot;
                 switch (key.wVirtualKeyCode) {
+                case VK_SPACE: slot = 4; break;
                 case 'W': slot = 0; break;
                 case 'S': slot = 1; break;
                 case 'A': slot = 2; break;
                 case 'D': slot = 3; break;
-                case 'Q': case VK_ESCAPE: quit |= key.bKeyDown != 0; continue;
+                case VK_ESCAPE: if(key.bKeyDown) mouse_.release(); continue;
+                case 'Q': quit |= key.bKeyDown != 0; continue;
                 default: continue;
                 }
                 pressed[slot] |= key.bKeyDown && !held_[slot];
                 held_[slot] = key.bKeyDown != 0;
             }
         }
+        mouse_.poll(dx,dy);
         auto active = [&](int i) { return held_[i] || pressed[i]; };
-        return {active(0) - active(1), active(2) - active(3), quit};
+        return {active(0) - active(1), active(2) - active(3), quit, pressed[4], dx, dy};
     }
 
     void present(const Screen& screen) override {
-        const std::string frame = screen.toDisplayString();
         const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
         CONSOLE_SCREEN_BUFFER_INFO info{};
         if (!GetConsoleScreenBufferInfo(output, &info)) {
-            std::cout << "\x1b[H" << frame << std::flush;
+            std::cout << "\x1b[H" << screen.toAnsiString() << std::flush;
             return;
         }
 
@@ -91,8 +113,15 @@ public:
         for (int y = 0; y < rows; ++y) {
             for (int x = 0; x < columns; ++x) {
                 auto& cell = cells_[y * columns + x];
-                cell.Char.UnicodeChar = frame[y * stride + x];
+                const auto pixel = screen.framedCell(x, y);
+                cell.Char.UnicodeChar = static_cast<unsigned char>(pixel.glyph);
                 cell.Attributes = info.wAttributes;
+                if (pixel.color != Screen::DefaultColor) {
+                    const unsigned c = pixel.color;
+                    cell.Attributes = static_cast<WORD>((info.wAttributes & ~0x0f) |
+                        ((c & 1) ? FOREGROUND_RED : 0) | ((c & 2) ? FOREGROUND_GREEN : 0) |
+                        ((c & 4) ? FOREGROUND_BLUE : 0) | ((c & 8) ? FOREGROUND_INTENSITY : 0));
+                }
             }
         }
         SMALL_RECT area = info.srWindow;
@@ -104,15 +133,34 @@ public:
 
 private:
     CONSOLE_FONT_INFOEX originalFont_{sizeof(CONSOLE_FONT_INFOEX)};
+    DWORD savedInputMode_{};
+    MouseCapture mouse_;
+    bool mouseEnabled_ = false;
+    SMALL_RECT originalView_{};
     bool fontChanged_ = false;
-    bool held_[4]{};
-    void configureTerminal() {
+    bool held_[5]{};
+    void configureTerminal(int fontHeight) {
         const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-        if (GetCurrentConsoleFontEx(output, FALSE, &originalFont_) && originalFont_.dwFontSize.Y > 10) {
+        CONSOLE_SCREEN_BUFFER_INFO before{};
+        if (GetConsoleScreenBufferInfo(output, &before) && GetCurrentConsoleFontEx(output, FALSE, &originalFont_) && fontHeight > 0 && originalFont_.dwFontSize.Y > fontHeight) {
             auto smaller = originalFont_;
-            smaller.dwFontSize.Y = static_cast<SHORT>(std::max(10, originalFont_.dwFontSize.Y * 4 / 5));
+            smaller.dwFontSize.Y = static_cast<SHORT>(fontHeight);
             smaller.dwFontSize.X = 0; // Let the host choose the matching glyph width.
+            originalView_ = before.srWindow;
             fontChanged_ = SetCurrentConsoleFontEx(output, FALSE, &smaller) != FALSE;
+            CONSOLE_FONT_INFOEX actual{sizeof(CONSOLE_FONT_INFOEX)};
+            CONSOLE_SCREEN_BUFFER_INFO after{};
+            if (fontChanged_ && GetCurrentConsoleFontEx(output,FALSE,&actual) && GetConsoleScreenBufferInfo(output,&after)) {
+                const COORD limit = GetLargestConsoleWindowSize(output);
+                auto extent = [](int cells,int oldPixel,int newPixel,int maximum) {
+                    return static_cast<SHORT>(std::clamp(cells * oldPixel / std::max(1,newPixel),1,std::max(1,maximum)));
+                };
+                SHORT w = extent(originalView_.Right-originalView_.Left+1,originalFont_.dwFontSize.X,actual.dwFontSize.X,limit.X);
+                SHORT h = extent(originalView_.Bottom-originalView_.Top+1,originalFont_.dwFontSize.Y,actual.dwFontSize.Y,limit.Y);
+                COORD buffer{std::max(w,after.dwSize.X),std::max(h,after.dwSize.Y)};
+                SMALL_RECT view{0,0,static_cast<SHORT>(w-1),static_cast<SHORT>(h-1)};
+                if (SetConsoleScreenBufferSize(output,buffer)) SetConsoleWindowInfo(output,TRUE,&view);
+            }
         }
         DWORD outputMode = 0;
         if (GetConsoleMode(output, &outputMode)) {
@@ -138,8 +186,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<Platform> createPlatform() {
-    return std::make_unique<WindowsTerminalPlatform>();
+std::unique_ptr<Platform> createPlatform(int fontHeight) {
+    return std::make_unique<WindowsTerminalPlatform>(fontHeight);
 }
 
 #endif

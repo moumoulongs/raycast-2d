@@ -9,7 +9,7 @@
 
 class App {
 public:
-    explicit App(std::unique_ptr<Platform> platform);
+    explicit App(std::unique_ptr<Platform> platform, WorldMap map);
 
     int run();
 
