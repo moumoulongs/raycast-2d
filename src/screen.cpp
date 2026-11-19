@@ -13,20 +13,13 @@ void Screen::clear() {
     std::fill(canvas_.begin(), canvas_.end(), Cell{' ', DefaultColor});
 }
 
-void Screen::drawCell(int x, int y, char glyph, unsigned char color) {
-    if (x < 0 || y < 0 || x >= width_ || y >= height_) {
-        return;
-    }
-
-    canvas_[static_cast<std::size_t>(y) * width_ + x] = {glyph, std::min(color, DefaultColor)};
-}
-
-int Screen::width() const {
-    return width_;
-}
-
-int Screen::height() const {
-    return height_;
+void Screen::resize(int width, int height) {
+    const int w = std::max(1, width);
+    const int h = std::max(1, height);
+    if (w == width_ && h == height_) return;
+    width_ = w;
+    height_ = h;
+    canvas_.assign(static_cast<std::size_t>(width_) * height_, Cell{' ', DefaultColor});
 }
 
 Screen::Cell Screen::framedCell(int x, int y) const {

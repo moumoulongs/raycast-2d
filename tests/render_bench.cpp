@@ -5,9 +5,33 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <string>
 
-int main() {
+int main(int argc, char** argv) {
     using Clock = std::chrono::steady_clock;
+    if (argc > 1 && std::string(argv[1]) == "--rlyeh") {
+        WorldMap map("assets/maps/rlyeh.map", "assets/textures/rlyeh.atlas");
+        Camera cam(map.spawnPosition(), map.spawnDirection());
+        for (auto wh : {std::pair{160,60}, {320,110}, {600,200}, {760,240}}) {
+            Screen scr(wh.first, wh.second);
+            double tRender = 0, tClear = 0;
+            const int N = 30;
+            for (int i = 0; i < N; ++i) {
+                const double t = i * 0.05;
+                map.animate(t);
+                auto c0 = Clock::now();
+                scr.clear();
+                auto r0 = Clock::now();
+                cam.render(map, scr, nullptr, t);
+                auto r1 = Clock::now();
+                tClear += std::chrono::duration<double, std::milli>(r0 - c0).count();
+                tRender += std::chrono::duration<double, std::milli>(r1 - r0).count();
+            }
+            std::cout << wh.first << "x" << wh.second << " clear=" << tClear/N
+                      << "ms render=" << tRender/N << "ms total=" << (tClear+tRender)/N << "ms\n";
+        }
+        return 0;
+    }
     for (const char* file : {"assets/maps/foundry.map", "assets/maps/skyway.map"}) {
         WorldMap map(file, "assets/textures/industrial.atlas");
         Camera camera(map.spawnPosition(), map.spawnDirection());

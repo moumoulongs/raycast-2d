@@ -1,0 +1,202 @@
+; R'LYEH: THE SUNKEN SANCTUM OF THE SLEEPER
+; Lovecraftian non-Euclidean sunken temple with shifting textures, breathing terrain,
+; surging monoliths, starry eclipsed cosmos, and multi-layered eldritch particles.
+
+sky eldritch
+fog 13 36 6
+
+; Static & towering cyclopean architecture
+tile # 0 1 5 3.8
+tile E 0 2 5 3.3
+tile F 0 4 6 3.1
+tile I 0 3 5 4.0
+
+; Dynamic surging & texture-morphing monoliths
+tile G 0 1 5 3.4
+monolith G 2.2 3.8 11 0.0
+morph G 9 0.15 2 5
+
+tile M 0 3 5 3.8
+monolith M 1.1 4.6 10 0.0
+morph M 10 0.25 16 6
+
+tile N 0 3 5 3.8
+monolith N 1.1 4.6 10 0.5
+morph N 10 0.75 16 6
+
+; Eastern Abyssal Organ harmonic spires
+tile 1 0 3 5 3.0
+monolith 1 0.9 4.8 8 0.00
+morph 1 12 0.00 2 5
+
+tile 2 0 3 5 3.0
+monolith 2 0.9 4.8 8 0.25
+morph 2 12 0.25 16 6
+
+tile 3 0 3 5 3.0
+monolith 3 0.9 4.8 8 0.50
+morph 3 12 0.50 2 5
+
+tile 4 0 3 5 3.0
+monolith 4 0.9 4.8 8 0.75
+morph 4 12 0.75 16 6
+
+; Abyssal sea & rippling corruption flagstones
+tile ~ -2.8 0 7
+tile . 0 0 5
+tile r 0 0 5
+morph r 8 0.00 0 6
+tile s 0 0 5
+morph s 8 0.25 0 6
+tile t 0 0 5
+morph t 8 0.50 0 6
+tile u 0 0 5
+morph u 8 0.75 0 6
+
+; Undulating Leviathan Spine causeway (smooth breathing ribs!)
+tile A 0 0 8 1.0 9
+wave A -0.18 0.20 6 0.00
+tile B 0 0 8 1.0 9
+wave B -0.18 0.20 6 0.20
+tile C 0 0 8 1.0 9
+wave C -0.18 0.20 6 0.40
+tile D 0 0 8 1.0 9
+wave D -0.18 0.20 6 0.60
+tile K 0 0 8 1.0 9
+wave K -0.18 0.20 6 0.80
+
+; Rising tidal stepping stones (West & East abyssal crossings)
+tile W 0 0 5 1.0 9
+lift W -1.2 0.05 11 0.00
+morph W 11 0.25 0 6 9
+tile X 0 0 5 1.0 9
+lift X -1.2 0.05 11 0.20
+morph X 11 0.45 0 6 9
+tile Y 0 0 5 1.0 9
+lift Y -1.2 0.05 11 0.40
+morph Y 11 0.65 0 6 9
+
+; Phasing non-Euclidean labyrinth monoliths (walk across or ride upward!)
+tile P 0 0 6 1.0 2
+lift P 0.0 2.1 10 0.00
+tile Q 0 0 6 1.0 4
+lift Q 0.0 2.1 10 0.50
+
+; Stepped sunken altar & high Northern Overlook Balcony
+tile a 0.2 0 5 1.0 9
+tile b 0.4 0 15 1.0 9
+tile c 0.6 0 15 1.0 9
+tile d 0.8 0 6 1.0 9
+tile e 1.0 0 6 1.0 9
+tile f 1.2 0 15 1.0 9
+tile g 1.4 0 15 1.0 9
+
+; Player spawns on the South Arrival Pier facing North toward Cthulhu & the Eclipsed Black Sun
+spawn 22.5 39.5 0 -1
+
+; HERO CENTERPIECE: Colossal Cthulhu Awakening on the Sunken Altar
+prop 10 22.5 19.0 6.6 4.7 float 0.10 1.4 0.05
+
+; Writhing Abyssal Tentacles bursting out of the churning black sea
+prop 11 17.5 31.5 2.1 3.4 float 0.22 2.1 1.65
+prop 11 27.5 31.5 2.1 3.4 float 0.22 2.3 1.65
+prop 11 15.5 26.5 2.4 3.8 float 0.25 1.9 1.75
+prop 11 29.5 26.5 2.4 3.8 float 0.25 2.0 1.75
+prop 11 14.5 13.5 2.3 3.7 float 0.24 1.8 1.70
+prop 11 30.5 13.5 2.3 3.7 float 0.24 2.2 1.70
+prop 11 33.5 27.5 2.0 3.2 float 0.20 2.4 1.65
+prop 11 11.5 27.5 2.0 3.2 float 0.20 2.1 1.65
+
+; Sacrificial Eldritch Braziers flanking the pier, altar & overlook
+prop 12 18.5 35.5 1.1 1.8
+prop 12 26.5 35.5 1.1 1.8
+prop 12 19.5 22.5 1.1 1.9
+prop 12 25.5 22.5 1.1 1.9
+prop 12 19.5 7.5 1.1 1.8
+prop 12 25.5 7.5 1.1 1.8
+
+; Western Chamber of the Bleeding Heart: Hovering Necronomicon Relic
+prop 13 7.5 19.5 1.9 1.6 float 0.22 2.5 0.75
+
+; Eastern Drowned Choir & Northern Sanctum: Elder Sign Star-Obelisks
+prop 14 37.5 19.5 1.9 3.4
+prop 14 17.5 5.5 1.4 2.8
+prop 14 27.5 5.5 1.4 2.8
+
+; === RICH ELDRITCH PARTICLE EFFECTS ===
+; Twin counter-rotating Arcane Halos spinning above Cthulhu's brow
+emitter halo 22.5 19.0 3.6 4.4 5.0 36 13 14 1.1
+emitter halo 22.5 19.0 2.3 5.1 5.6 24 10 9 1.6
+
+; Colossal Abyssal Maelstrom Vortex spiraling around the Sunken Altar
+emitter vortex 22.5 19.0 5.4 -0.8 5.6 88 10 14 1.0
+emitter vortex 22.5 29.0 3.2 -0.6 2.8 34 6 13 0.9
+
+; Periodic Dimensional Lightning striking the Obelisks & Organ Spires from the starry sky
+emitter lightning 22.5 19.0 4.8 0.4 9.2 32 14 13 1.0
+emitter lightning 37.5 19.5 4.2 0.2 8.8 28 10 14 1.15
+emitter lightning 7.5 19.5 3.6 0.2 8.5 26 9 13 0.9
+
+; Ritual Geyser Embers erupting from braziers and the Necronomicon
+emitter geyser 18.5 35.5 0.5 1.0 3.2 18 10 14 1.1
+emitter geyser 26.5 35.5 0.5 1.0 3.2 18 10 13 1.1
+emitter geyser 7.5 19.5 1.6 0.3 3.4 36 9 13 1.2
+emitter geyser 37.5 19.5 1.8 0.4 4.2 34 10 14 1.0
+
+; Phantasmagoric Floating Watcher Eyes blinking in the abyssal mist!
+emitter watchers 22.5 24.0 13.0 1.2 4.8 26 9 11 1.0
+emitter watchers 7.5 20.0 5.0 1.0 3.2 16 9 13 1.2
+
+; Bioluminescent Deep-Sea Spores drifting across the sunken sanctuary
+emitter spores 22.5 26.0 16.0 -0.2 3.8 70 10 14 1.0
+emitter spores 37.5 20.0 7.0 0.2 4.2 42 14 13 1.1
+
+; Slanted Cursed Abyssal Rain falling from the stormy cosmic sky
+emitter rain 22.5 24.0 20.0 -1.5 8.5 95 6 14 1.15
+
+; 45x45 NON-EUCLIDEAN SUNKEN TEMPLE GRID (exact symmetry around x=22)
+row #############################################
+row #############################################
+row ############.....................############
+row #########.....I...............I.....#########
+row #######....I...ggggggggggggggg...I....#######
+row ######.........ggggggggggggggg.........######
+row #####...I......ggfffffffffffgg......I...#####
+row ####...........ggfeeeeeeeeeegg...........####
+row ###....I.......ggedddddddddggg.......I....###
+row ###............ggecccccccccggg............###
+row ###....~~~~~~~~~~~ccccccccc~~~~~~~~~~~~...###
+row ###....~~~~~~~~~~~~ccbbbcc~~~~~~~~~~~~~...###
+row ###....~~~~~~~~~~M~~cbbbc~~M~~~~~~~~~~~...###
+row ###....~~~~~~~~~~~~~abbba~~~~~~~~~~~~~~...###
+row ###..EEEEE~~~~~N~~aabbbbbaa~~N~~~~1..2....###
+row ###.EF...FE~~~~~~~abcccccba~~~~~~~........###
+row ###.EF.r.FE~~~~~~~abcccccba~~~~~~~.1...3..###
+row ###.F..s..F~~~~~~~abcccccba~~~~~~~........###
+row ###.F.rtu.F~WWXXYYabcccccbaYYXXWW~~.aaa...###
+row ###.F.tst...WWXXYYabcccccbaYYXXWW...aba...###
+row ###.F.rtu.F~WWXXYYabcccccbaYYXXWW~~.aaa...###
+row ###.F..s..F~~~~~~~abcccccba~~~~~~~........###
+row ###.EF.r.FE~~~~~~~abcccccba~~~~~~~.2...4..###
+row ###.EF...FE~~~~~~~aabbbbbaa~~~~~~~........###
+row ###..EE.EE~~~~~M~~~aabbbbaa~~M~~~~3..1....###
+row ###....P~~~~~~~~~~~~~KKK~~~~~~~~~~~~~~~...###
+row ###...E.E~~~~~~~~~~~~KKK~~~~~~~~~~~~~~....###
+row ###....Q~~~~~~~~~~~~~DDD~~~~~~~~~~~~~~....###
+row ###...E.E~~~~~~~~~~~~DDD~~~~~~~~~~~~~~....###
+row ###....P~~~~~~~~~~~~~CCC~~~~~~~~~~~~~~....###
+row ###...E.E~~~~~~~~~~~~CCC~~~~~~~~~~~~~~....###
+row ###....Q~~~~~~~~~~~~~BBB~~~~~~~~~~~~~~....###
+row ###...E.E~~~~~~~~~~~~BBB~~~~~~~~~~~~~~....###
+row ###....r~~~~~~~~~~~~~AAA~~~~~~~~~~~~~~....###
+row ###....s~~~~~~~~~~~~~AAA~~~~~~~~~~~~~~....###
+row ###....t......G......rrr......G........u..###
+row ###....u.....GG.....rstsr.....GG.......t..###
+row ####.........GG.....stuts.....GG.......s.####
+row #####...............tutut...............#####
+row ######..............urtru..............######
+row #######..............rrr..............#######
+row #########...........................#########
+row ############.....................############
+row #############################################
+row #############################################

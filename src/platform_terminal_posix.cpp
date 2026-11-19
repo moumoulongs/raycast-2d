@@ -50,9 +50,14 @@ public:
                     auto end = i + 2;
                     while (end < pending_.size() && (pending_[end] < '@' || pending_[end] > '~')) ++end;
                     if (end == pending_.size() && left < 64 && n > 0) break;
-                    if (end < pending_.size() && console_) {
-                        if (pending_[end] == 'A') state.consoleKeys += ConsoleKey::Previous;
-                        if (pending_[end] == 'B') state.consoleKeys += ConsoleKey::Next;
+                    if (end < pending_.size()) {
+                        if (console_) {
+                            if (pending_[end] == 'A') state.consoleKeys += ConsoleKey::Previous;
+                            if (pending_[end] == 'B') state.consoleKeys += ConsoleKey::Next;
+                        } else {
+                            if (pending_[end] == 'A') state.menuUp = true;
+                            if (pending_[end] == 'B') state.menuDown = true;
+                        }
                     }
                     i = std::min(end + 1, pending_.size());
                     continue;
@@ -76,11 +81,16 @@ public:
             if (state.consoleConsumed) continue;
             switch (key) {
             case ' ': state.jump = true; break;
-            case 'w': case 'W': state.move = 1; break;
-            case 's': case 'S': state.move = -1; break;
+            case 'w': case 'W': state.move = 1; state.menuUp = true; break;
+            case 's': case 'S': state.move = -1; state.menuDown = true; break;
             case 'a': case 'A': state.strafe = 1; break;
             case 'd': case 'D': state.strafe = -1; break;
-            case 'q': case 'Q': case 27: state.exit = true; break;
+            case '\t': state.toggleMinimap = true; break;
+            case 'h': case 'H': state.toggleHud = true; break;
+            case 'm': case 'M': state.toggleMenu = true; break;
+            case '\r': case '\n': state.menuConfirm = true; break;
+            case 27: state.toggleMenu = true; break;
+            case 'q': case 'Q': state.exit = true; break;
             }
         }
         pending_.erase(0, i);

@@ -14,4 +14,13 @@ struct InputState {
     int mouseX = 0, mouseY = 0; // look delta
     bool consoleActive = false, consoleConsumed = false;
     std::string consoleKeys;
+    bool mouseLocked = false;
+    bool toggleHud = false;
+    bool toggleMinimap = false;
+    bool toggleMenu = false;
+    bool menuUp = false;
+    bool menuDown = false;
+    bool menuConfirm = false;
+    int viewportWidth = 0;
+    int viewportHeight = 0;
 };

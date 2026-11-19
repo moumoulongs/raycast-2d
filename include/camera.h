@@ -21,8 +21,11 @@ public:
 private:
     bool canOccupy(const WorldMap& map, double x, double y) const;
 
-    // Column-major scratch: DDA writes vertical spans consecutively.
-    mutable std::vector<double> depthBuffer_;
+    // Column-major scratch (4-byte float for 2x cache density): DDA writes vertical spans consecutively.
+    mutable std::vector<float> depthBuffer_;
+    mutable std::vector<double> invRowDist_;
+    struct VisibleProp { const WorldProp* prop; double depth; double lateral; };
+    mutable std::vector<VisibleProp> visibleProps_;
 
     double pitch_ = 0;
     double feet_ = 0, verticalSpeed_ = 0;

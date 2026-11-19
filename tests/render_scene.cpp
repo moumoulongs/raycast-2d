@@ -1,7 +1,76 @@
 #include "camera.h"
+#include "hud_ui.h"
 #include <iostream>
 
 int main(int argc, char** argv) {
+    WorldMap rlyeh("assets/maps/rlyeh.map", "assets/textures/rlyeh.atlas");
+    if (!rlyeh.sky().eldritch || !rlyeh.fog().enabled || rlyeh.emitters().size() < 10) {
+        std::cerr << "R'lyeh map missing sky, fog, or emitters\n";
+        return 1;
+    }
+    rlyeh.animate(0.0);
+    const double spineAt0 = rlyeh.at(22, 33).floor;
+    const double monolithAt0 = rlyeh.at(17, 12).wallHeight;
+    const int morphWallAt0 = rlyeh.at(17, 12).wall;
+    const int morphFloorAt0 = rlyeh.at(22, 35).surface;
+    rlyeh.animate(3.0);
+    const double spineAt3 = rlyeh.at(22, 33).floor;
+    const double monolithAt3 = rlyeh.at(17, 12).wallHeight;
+    rlyeh.animate(5.0);
+    const int morphWallAt5 = rlyeh.at(17, 12).wall;
+    const int morphFloorAt5 = rlyeh.at(22, 35).surface;
+    if (std::abs(spineAt0 - spineAt3) < 0.1 || std::abs(monolithAt0 - monolithAt3) < 0.5 ||
+        morphWallAt0 == morphWallAt5 || morphFloorAt0 == morphFloorAt5) {
+        std::cerr << "R'lyeh dynamic terrain or texture morph failed to animate\n";
+        return 1;
+    }
+    Camera cultist(rlyeh.spawnPosition(), rlyeh.spawnDirection());
+    Screen eldritchView(120, 42);
+    rlyeh.animate(1.5);
+    cultist.render(rlyeh, eldritchView, nullptr, 1.5);
+    const auto rlyehFrame1 = eldritchView.toDisplayString();
+    if (argc > 1 && (std::string(argv[1]) == "--rlyeh" || std::string(argv[1]) == "--hud" ||
+                     std::string(argv[1]) == "--title" || std::string(argv[1]) == "--hud-large" ||
+                     std::string(argv[1]) == "--title-large")) {
+        const std::string mode = argv[1];
+        const bool large = (mode == "--hud-large" || mode == "--title-large");
+        Screen preview(large ? 220 : 120, large ? 76 : 42);
+        cultist.render(rlyeh, preview, nullptr, 1.5);
+        if (mode != "--rlyeh") {
+            HudUi hud({{"R'LYEH", "Cthulhu Horror", "assets/maps/rlyeh.map", "assets/textures/rlyeh.atlas"}}, 0);
+            if (mode == "--hud" || mode == "--hud-large") {
+                InputState enter{};
+                enter.menuConfirm = true;
+                hud.update(enter, 0.016);
+            }
+            hud.draw(preview, rlyeh, cultist.pose(), "rlyeh.map", 1.5, 428.0, true, false);
+        }
+        std::cout << preview.toDisplayString() << '\n';
+        return 0;
+    }
+    unsigned rlyehColors = 0;
+    int skyStars = 0;
+    for (int y = 1; y <= eldritchView.height(); ++y) {
+        for (int x = 1; x <= eldritchView.width(); ++x) {
+            auto cell = eldritchView.framedCell(x, y);
+            if (cell.color < 16 && cell.glyph != ' ') rlyehColors |= 1u << cell.color;
+            if (y <= 14 && cell.glyph != ' ') ++skyStars;
+        }
+    }
+    int colorCount = 0;
+    for (int c = 0; c < 16; ++c) if (rlyehColors & (1u << c)) ++colorCount;
+    if (colorCount < 6 || skyStars < 20) {
+        std::cerr << "R'lyeh frame lacks rich colors or starry sky (colors=" << colorCount << ", sky=" << skyStars << ")\n";
+        return 1;
+    }
+    eldritchView.clear();
+    rlyeh.animate(4.2);
+    cultist.render(rlyeh, eldritchView, nullptr, 4.2);
+    if (rlyehFrame1 == eldritchView.toDisplayString()) {
+        std::cerr << "R'lyeh scene did not animate over time\n";
+        return 1;
+    }
+
     WorldMap well("assets/maps/star_well.map", "assets/textures/star_well.atlas");
     if(well.swarms().size()!=2)return 1;
     well.animate(4);if(!(well.at(20,21).floor>well.at(20,16).floor)) return 1;

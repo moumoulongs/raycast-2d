@@ -6,6 +6,7 @@ set(RAYCAST_2D_SOURCES
     src/app.cpp
     src/net_session.cpp
     src/console_ui.cpp
+    src/hud_ui.cpp
     src/camera.cpp
     src/main.cpp
     src/screen.cpp
@@ -25,7 +26,7 @@ add_custom_command(TARGET raycast-2d POST_BUILD
     VERBATIM)
 
 if(WIN32)
-    target_link_libraries(raycast-2d PRIVATE ws2_32)
+    target_link_libraries(raycast-2d PRIVATE ws2_32 user32 gdi32 winmm)
 endif()
 include(CTest)
 if (BUILD_TESTING)
@@ -39,7 +40,7 @@ if (BUILD_TESTING)
     add_executable(render_bench EXCLUDE_FROM_ALL tests/render_bench.cpp src/camera.cpp src/screen.cpp src/world_map.cpp)
     target_compile_features(render_bench PRIVATE cxx_std_17)
     target_include_directories(render_bench PRIVATE include)
-    add_executable(render_scene_test tests/render_scene.cpp src/camera.cpp src/screen.cpp src/world_map.cpp)
+    add_executable(render_scene_test tests/render_scene.cpp src/camera.cpp src/screen.cpp src/world_map.cpp src/hud_ui.cpp)
     target_compile_features(render_scene_test PRIVATE cxx_std_17)
     target_include_directories(render_scene_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_test(NAME render_scene COMMAND render_scene_test)
@@ -51,6 +52,7 @@ target_include_directories(raycast-2d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includ
 
 if (MSVC)
     target_compile_options(raycast-2d PRIVATE /W4 /permissive-)
+    target_link_options(raycast-2d PRIVATE "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
 else()
     target_compile_options(raycast-2d PRIVATE -Wall -Wextra -Wpedantic)
 endif()

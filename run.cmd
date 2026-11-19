@@ -4,14 +4,13 @@ pushd "%~dp0" || exit /b 1
 cmake -S . -B out/play -DCMAKE_BUILD_TYPE=Release || goto fail
 cmake --build out/play --config Release --target raycast-2d || goto fail
 if /i "%~1"=="--build-only" goto done
-set "game=out\play\raycast-2d.exe"
-if exist "out\play\Release\raycast-2d.exe" set "game=out\play\Release\raycast-2d.exe"
+set "GAME_EXE=%cd%\out\play\raycast-2d.exe"
+if exist "%cd%\out\play\Release\raycast-2d.exe" set "GAME_EXE=%cd%\out\play\Release\raycast-2d.exe"
 if "%~1"=="" (
-    "%game%" --config "assets\game.cfg"
+    start "" "%GAME_EXE%" --config "%cd%\assets\game.cfg"
 ) else (
-    "%game%" %*
+    start "" "%GAME_EXE%" %*
 )
-if errorlevel 1 goto fail
 :done
 popd
 exit /b 0
