@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -16,8 +15,6 @@ public:
     void drawCell(int x, int y, char glyph, unsigned char color);
     Cell framedCell(int x, int y) const; // includes the one-cell border
     std::string toAnsiString() const;
-    void drawPoint(int x, int y, std::uint8_t luminance);
-    void drawLine(int x0, int y0, int x1, int y1, std::uint8_t luminance);
 
     int width() const;
     int height() const;
@@ -25,7 +22,6 @@ public:
 
 private:
     std::string formatFrame(bool ansi) const;
-    static char brightness(std::uint8_t value);
 
     int width_;
     int height_;

@@ -50,6 +50,8 @@ public:
     InputState pollInput() override {
         const HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
         DWORD pending = 0;
+        InputState result;
+        result.consoleConsumed = console_;
         bool quit = false;
         int dx = 0, dy = 0;
         bool pressed[5]{};
@@ -64,6 +66,8 @@ public:
                 const auto& event = events[i];
                 if (event.EventType == FOCUS_EVENT && !event.Event.FocusEvent.bSetFocus) {
                     mouse_.release();
+                    toggleHeld_ = false;
+                    std::fill_n(blocked_, 256, false);
                     dx = dy = 0;
                     std::fill_n(held_, 5, false);
                     std::fill_n(pressed, 5, false);
@@ -71,11 +75,44 @@ public:
                 if (mouseEnabled_ && event.EventType == MOUSE_EVENT) {
                     const auto& m = event.Event.MouseEvent;
                     const bool down = (m.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED) != 0;
-                    if (down && m.dwEventFlags == 0) mouse_.acquire();
+                    if (!result.consoleConsumed && down && m.dwEventFlags == 0) mouse_.acquire();
                     continue;
                 }
                 if (event.EventType != KEY_EVENT) continue;
                 const auto& key = event.Event.KeyEvent;
+                const auto vk = key.wVirtualKeyCode;
+                const auto ch = key.uChar.UnicodeChar;
+                if (vk == VK_OEM_3 || ch == '`' || ch == '~') {
+                    if (key.bKeyDown && !toggleHeld_) {
+                        console_ = !console_;
+                        result.consoleConsumed = true;
+                        result.consoleKeys += ConsoleKey::Reset;
+                        mouse_.release();
+                        const int codes[] = {'W', 'S', 'A', 'D', VK_SPACE};
+                        for (int n = 0; n < 5; ++n) {
+                            if (held_[n]) blocked_[codes[n]] = true;
+                            held_[n] = pressed[n] = false;
+                        }
+                    }
+                    toggleHeld_ = key.bKeyDown != 0;
+                    continue;
+                }
+                if (!key.bKeyDown && vk < 256) blocked_[vk] = false;
+                if (console_) {
+                    if (!key.bKeyDown) continue;
+                    if (vk < 256) blocked_[vk] = true;
+                    if (vk == VK_ESCAPE) {
+                        console_ = false;
+                        result.consoleKeys += ConsoleKey::Reset;
+                        continue;
+                    }
+                    char edit = vk == VK_UP ? ConsoleKey::Previous : vk == VK_DOWN ? ConsoleKey::Next :
+                                vk == VK_RETURN ? '\n' : vk == VK_BACK ? '\b' :
+                                ch >= 32 && ch <= 126 ? static_cast<char>(ch) : 0;
+                    if (edit) result.consoleKeys.append(key.wRepeatCount, edit);
+                    continue;
+                }
+                if (result.consoleConsumed || (vk < 256 && blocked_[vk])) continue;
                 int slot;
                 switch (key.wVirtualKeyCode) {
                 case VK_SPACE: slot = 4; break;
@@ -91,6 +128,8 @@ public:
                 held_[slot] = key.bKeyDown != 0;
             }
         }
+        result.consoleActive = console_;
+        if (result.consoleConsumed) return result;
         mouse_.poll(dx,dy);
         auto active = [&](int i) { return held_[i] || pressed[i]; };
         return {active(0) - active(1), active(2) - active(3), quit, pressed[4], dx, dy};
@@ -138,6 +177,8 @@ private:
     bool mouseEnabled_ = false;
     SMALL_RECT originalView_{};
     bool fontChanged_ = false;
+    bool console_ = false, toggleHeld_ = false;
+    bool blocked_[256]{};
     bool held_[5]{};
     void configureTerminal(int fontHeight) {
         const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);

@@ -9,7 +9,7 @@
 
 class App {
 public:
-    explicit App(std::unique_ptr<Platform> platform, WorldMap map);
+    explicit App(std::unique_ptr<Platform> platform, WorldMap map, std::uint64_t fingerprint, std::string mapName);
 
     int run();
 
@@ -18,4 +18,6 @@ private:
     WorldMap worldMap_;
     Camera camera_;
     Screen screen_;
+    std::uint64_t fingerprint_;
+    std::string mapName_;
 };

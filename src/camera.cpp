@@ -16,6 +16,24 @@ int edge(double p, int extent) {
     return static_cast<int>(std::clamp(std::ceil(p - 0.5), 0.0, double(extent)));
 }
 
+bool gridCoordinate(double value) {
+    return value >= 0 && value < std::numeric_limits<int>::max();
+}
+
+bool validPose(const PlayerPose& p) {
+    return gridCoordinate(p.x) && gridCoordinate(p.y) && std::isfinite(p.feet) &&
+           std::abs(p.feet) < std::numeric_limits<int>::max() &&
+           std::isfinite(p.yaw) && std::isfinite(p.pitch);
+}
+
+// A transparent, camera-facing figure with a compass-relative face/visor.
+char playerGlyph(double u, double v, char facing) {
+    const double side = std::abs(u - 0.5);
+    if (v < 0.27) return side < 0.28 ? facing : ' ';
+    if (v < 0.64) return side < 0.33 ? 'H' : '|';
+    return side > 0.08 && side < 0.32 ? '|' : ' ';
+}
+
 } // namespace
 
 Camera::Camera()
@@ -85,7 +103,23 @@ void Camera::turn(double seconds) {
     plane_.y = oldPlaneX * sine + plane_.y * cosine;
 }
 
-void Camera::render(const WorldMap& map, Screen& screen) const {
+PlayerPose Camera::pose() const {
+    return {position_.x, position_.y, feet_, std::atan2(forward_.y, forward_.x), pitch_};
+}
+
+void Camera::applyPose(const PlayerPose& p) {
+    if (!validPose(p)) return;
+    position_ = vec2(p.x, p.y);
+    forward_ = vec2(std::cos(p.yaw), std::sin(p.yaw));
+    plane_ = vec2(forward_.y * kPlaneWidth, -forward_.x * kPlaneWidth);
+    feet_ = p.feet;
+    pitch_ = std::clamp(p.pitch, -0.65, 0.65);
+    initialized_ = true;
+    grounded_ = true;
+    verticalSpeed_ = 0;
+}
+
+void Camera::render(const WorldMap& map, Screen& screen, const PlayerPose* other, double animationTime) const {
     const double posX = position_.x;
     const double posY = position_.y;
     const double dirX = forward_.x;
@@ -94,7 +128,8 @@ void Camera::render(const WorldMap& map, Screen& screen) const {
     const int screenHeight = screen.height();
 
     if (screenWidth <= 0 || screenHeight <= 0 || forward_.magnitudeSquared() == 0) return;
-    std::vector<double> wallDepth(size_t(screenWidth) * screenHeight, std::numeric_limits<double>::infinity());
+    auto& wallDepth = depthBuffer_;
+    wallDepth.assign(size_t(screenWidth) * screenHeight, std::numeric_limits<double>::infinity());
     const double eye = (initialized_ ? feet_ : map.at(int(posX),int(posY)).floor) + 0.5;
     const double horizon = screenHeight * (0.5 + std::tan(pitch_));
     for (int x = 0; x < screenWidth; ++x) {
@@ -140,11 +175,13 @@ void Camera::render(const WorldMap& map, Screen& screen) const {
             // Project this tile's horizontal floor only over the ray interval inside it.
             const double first = project(tile.floor,entry), last = project(tile.floor,end);
             const auto& surface = map.texture(tile.surface);
+            const double originX = posX - animationTime * surface.flowX;
+            const double originY = posY - animationTime * surface.flowY;
             for(int y=edge(std::min(first,last),screenHeight); y<edge(std::max(first,last),screenHeight); ++y){
                 if(tile.floor >= eye) break; // do not draw the underside
                 const double d=(eye-tile.floor)*screenHeight/(y+0.5-horizon);
-                auto& depth=wallDepth[y*screenWidth+x];
-                if(d>0 && d<depth){depth=d; screen.drawCell(x,y,surface.sample(posX+d*rayDirX,posY+d*rayDirY),surface.color);}
+                auto& depth=wallDepth[size_t(x)*screenHeight+y];
+                if(d>0 && d<depth){depth=d; screen.drawCell(x,y,surface.sample(originX+d*rayDirX,originY+d*rayDirY),surface.color);}
             }
             if(sideDistX < sideDistY){side=0;mapX+=stepX;sideDistX+=deltaDistX;}
             else {side=1;mapY+=stepY;sideDistY+=deltaDistY;}
@@ -156,7 +193,7 @@ void Camera::render(const WorldMap& map, Screen& screen) const {
                 const auto& tex=map.texture(next.wall?next.wall:next.surface);
                 const double u=side?posX+end*rayDirX:posY+end*rayDirY;
                 for(int y=edge(project(top,end),screenHeight);y<edge(project(tile.floor,end),screenHeight);++y){
-                    auto& depth=wallDepth[y*screenWidth+x];
+                    auto& depth=wallDepth[size_t(x)*screenHeight+y];
                     if(end<depth){depth=end; const double z=eye-(y+0.5-horizon)*end/screenHeight;
                         screen.drawCell(x,y,tex.sample(u,top-z),tex.color);}
                 }
@@ -184,14 +221,44 @@ void Camera::render(const WorldMap& map, Screen& screen) const {
         const double width = screenWidth * 0.5 * prop.width / (kPlaneWidth * item.depth);
         const double left = screenWidth * 0.5 * (1.0 + item.lateral / item.depth) - width * 0.5;
         const int bottom = edge(floorY, screenHeight), right = edge(left + width, screenWidth);
+        const auto& texture = map.texture(prop.textureId);
         for (int x = edge(left, screenWidth); x < right; ++x) {
 
             for (int y = edge(top, screenHeight); y < bottom; ++y) {
-                if(item.depth >= wallDepth[y*screenWidth+x]) continue;
-                const auto& texture = map.texture(prop.textureId);
+                if(item.depth >= wallDepth[size_t(x)*screenHeight+y]) continue;
                 const char glyph = texture.sample( (x + 0.5 - left) / width, (y + 0.5 - top) / height);
-                if (glyph != ' ') screen.drawCell(x, y, glyph, texture.color);
+                if (glyph != ' ') { screen.drawCell(x,y,glyph,texture.color); if(other || !map.swarms().empty()) wallDepth[size_t(x)*screenHeight+y]=item.depth; }
             }
         }
     }
+    // Analytic spirals: late joiners need only the host clock, not particle packets.
+    for (const auto& swarm : map.swarms()) {
+        for(int i=0;i<swarm.count;++i){
+            const double rise=std::fmod(animationTime*(0.13+0.012*(i%5))+i*0.618034,1.0);
+            const double angle=i*2.399963+rise*4.0+animationTime*0.2;
+            const double radius=swarm.radius*(0.15+0.85*rise);
+            const vec2 v(swarm.x+radius*std::cos(angle)-posX,swarm.y+radius*std::sin(angle)-posY);
+            const double d=v*forward_; if(d<0.08) continue;
+            const double sx=screenWidth*.5*(1+(v*plane_)/(kPlaneWidth*kPlaneWidth*d));
+            const double sy=horizon+(eye-rise*swarm.height)*screenHeight/d;
+            if(sx<0||sx>=screenWidth||sy<0||sy>=screenHeight) continue;
+            int x=int(sx),y=int(sy); auto& depth=wallDepth[size_t(x)*screenHeight+y];
+            if(d<depth){depth=d;screen.drawCell(x,y,rise>.75?'*':rise>.35?'+':'.',i%5?10:13);}
+        }
+    }
+    if (!other || !validPose(*other)) return;
+    const vec2 offset(other->x-posX,other->y-posY);
+    const double depth=offset*forward_;
+    if(depth<=0.05) return;
+    const double h=screenHeight/depth, w=screenWidth*0.25/(kPlaneWidth*depth);
+    const double left=screenWidth*0.5*(1+(offset*plane_)/(kPlaneWidth*kPlaneWidth*depth))-w*0.5;
+    const double top=horizon+(eye-other->feet-1)*h;
+    const double relative=other->yaw-std::atan2(dirY,dirX);
+    const char facing=std::abs(std::sin(relative))>0.7?(std::sin(relative)>0?'<':'>'):(std::cos(relative)>0?'O':'@');
+    for(int x=edge(left,screenWidth);x<edge(left+w,screenWidth);++x)
+        for(int y=edge(top,screenHeight);y<edge(top+h,screenHeight);++y){
+            if(depth>=wallDepth[size_t(x)*screenHeight+y]) continue;
+            const char c=playerGlyph((x+0.5-left)/w,(y+0.5-top)/h,facing);
+            if(c!=' ') screen.drawCell(x,y,c,13);
+        }
 }

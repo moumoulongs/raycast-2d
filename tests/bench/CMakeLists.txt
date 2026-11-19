@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(render_benchmark LANGUAGES CXX)
+set(RENDER_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../.." CACHE PATH "Renderer source tree to measure")
+add_executable(render_bench ../render_bench.cpp ${RENDER_SOURCE}/src/camera.cpp ${RENDER_SOURCE}/src/world_map.cpp ${RENDER_SOURCE}/src/screen.cpp)
+target_include_directories(render_bench PRIVATE ${RENDER_SOURCE}/include)
+target_compile_features(render_bench PRIVATE cxx_std_17)

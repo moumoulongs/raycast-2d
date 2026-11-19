@@ -11,6 +11,23 @@ std::string trim(const std::string& s) {
     auto first = s.find_first_not_of(" \r\t");
     return first == s.npos ? "" : s.substr(first, s.find_last_not_of(" \r\t") - first + 1);
 }
+// Hash normalized resource lines so LF and CRLF copies can play together.
+std::uint64_t resourceFingerprint(const fs::path& map, const fs::path& atlas) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    auto add = [&](unsigned char c) { hash = (hash ^ c) * 1099511628211ULL; };
+    for (const auto& path : {map, atlas}) {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) throw std::runtime_error("Cannot fingerprint: " + path.string());
+        std::string line;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            for (unsigned char c : line) add(c);
+            add('\n');
+        }
+        add(0);
+    }
+    return hash;
+}
 struct Settings { fs::path map, textures; int font = 8; };
 Settings load(const fs::path& path) {
     std::ifstream in(path);
@@ -46,7 +63,7 @@ int main(int argc, char** argv) {
         else if (argc != 1) throw std::runtime_error("Usage: raycast-2d [--config FILE]");
         auto cfg = load(config);
         WorldMap map(cfg.map, cfg.textures);
-        App app(createPlatform(cfg.font), std::move(map));
+        App app(createPlatform(cfg.font), std::move(map), resourceFingerprint(cfg.map,cfg.textures), cfg.map.filename().u8string());
         return app.run();
     } catch (const std::exception& e) {
         std::cerr << "raycast-2d: " << e.what() << '\n';

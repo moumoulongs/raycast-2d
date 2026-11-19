@@ -38,8 +38,43 @@ public:
         InputState state;
         char keys[64];
         const ssize_t n = ::read(STDIN_FILENO, keys, sizeof(keys));
-        for (ssize_t i = 0; i < n; ++i) {
-            switch (keys[i]) {
+        if (n > 0) pending_.append(keys, static_cast<std::size_t>(n));
+        state.consoleConsumed = console_;
+        std::size_t i = 0;
+        while (i < pending_.size()) {
+            const char key = pending_[i];
+            if (key == 27) {
+                const auto left = pending_.size() - i;
+                if (left == 1 && n > 0) break; // Allow the rest of a split arrow sequence to arrive.
+                if (left > 1 && (pending_[i+1] == '[' || pending_[i+1] == 'O')) {
+                    auto end = i + 2;
+                    while (end < pending_.size() && (pending_[end] < '@' || pending_[end] > '~')) ++end;
+                    if (end == pending_.size() && left < 64 && n > 0) break;
+                    if (end < pending_.size() && console_) {
+                        if (pending_[end] == 'A') state.consoleKeys += ConsoleKey::Previous;
+                        if (pending_[end] == 'B') state.consoleKeys += ConsoleKey::Next;
+                    }
+                    i = std::min(end + 1, pending_.size());
+                    continue;
+                }
+            }
+            ++i;
+            if (key == '`' || key == '~' || (console_ && key == 27)) {
+                console_ = !console_;
+                state.consoleConsumed = true;
+                state.move = state.strafe = 0;
+                state.jump = state.exit = false;
+                state.consoleKeys += ConsoleKey::Reset;
+                continue;
+            }
+            if (console_) {
+                if (key == '\r' || key == '\n') state.consoleKeys += '\n';
+                else if (key == 127 || key == '\b') state.consoleKeys += '\b';
+                else if (key >= ' ' && key <= '~') state.consoleKeys += key;
+                continue;
+            }
+            if (state.consoleConsumed) continue;
+            switch (key) {
             case ' ': state.jump = true; break;
             case 'w': case 'W': state.move = 1; break;
             case 's': case 'S': state.move = -1; break;
@@ -48,6 +83,8 @@ public:
             case 'q': case 'Q': case 27: state.exit = true; break;
             }
         }
+        pending_.erase(0, i);
+        state.consoleActive = console_;
         return state;
     }
 
@@ -78,6 +115,8 @@ private:
         std::cout << "\x1b[2J\x1b[H\x1b[?25l" << std::flush;
     }
 
+    bool console_ = false;
+    std::string pending_;
     termios originalTermios_{};
     int width_ = 118;
     int height_ = 38;
