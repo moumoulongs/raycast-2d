@@ -1,13 +1,10 @@
 #include "camera.h"
+#include "thread_pool.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <condition_variable>
-#include <functional>
 #include <limits>
-#include <mutex>
-#include <thread>
 
 namespace {
 
@@ -102,93 +99,6 @@ struct SinLut {
 const SinLut& sinLut() {
     static const SinLut lut;
     return lut;
-}
-
-// Persistent column-stripe thread pool for large high-res viewports (zero per-frame thread creation).
-class ColumnPool {
-public:
-    ColumnPool() {
-        const unsigned hw = std::thread::hardware_concurrency();
-        const unsigned workers = hw > 1 ? std::min(hw - 1, 7u) : 0u;
-        threads_.reserve(workers);
-        for (unsigned i = 0; i < workers; ++i) {
-            threads_.emplace_back([this, i] { workerLoop(i); });
-        }
-    }
-    ~ColumnPool() {
-        {
-            std::lock_guard<std::mutex> lk(mu_);
-            stop_ = true;
-        }
-        cvStart_.notify_all();
-        for (auto& t : threads_) t.join();
-    }
-
-    template <typename Fn>
-    void parallelColumns(int totalCols, Fn&& fn) {
-        if (threads_.empty() || totalCols < 256) {
-            fn(0, totalCols);
-            return;
-        }
-        const int parts = static_cast<int>(threads_.size()) + 1;
-        // Align slice boundaries to 32 columns (64 bytes = 1 exact cache line) to eliminate false sharing.
-        const int slice = ((totalCols / parts + 31) / 32) * 32;
-        if (slice >= totalCols) {
-            fn(0, totalCols);
-            return;
-        }
-        std::function<void(int, int)> task = fn;
-        {
-            std::lock_guard<std::mutex> lk(mu_);
-            task_ = &task;
-            totalCols_ = totalCols;
-            slice_ = slice;
-            remaining_ = static_cast<int>(threads_.size());
-            ++generation_;
-        }
-        cvStart_.notify_all();
-        // Main thread executes stripe 0 while workers execute stripes 1..N.
-        fn(0, std::min(slice, totalCols));
-        std::unique_lock<std::mutex> lk(mu_);
-        cvDone_.wait(lk, [&] { return remaining_ == 0; });
-        task_ = nullptr;
-    }
-
-private:
-    void workerLoop(unsigned index) {
-        std::uint64_t seen = 0;
-        for (;;) {
-            std::function<void(int, int)>* task = nullptr;
-            int x0 = 0, x1 = 0;
-            {
-                std::unique_lock<std::mutex> lk(mu_);
-                cvStart_.wait(lk, [&] { return stop_ || generation_ != seen; });
-                if (stop_) return;
-                seen = generation_;
-                task = task_;
-                x0 = static_cast<int>(index + 1) * slice_;
-                x1 = (index + 1 == threads_.size()) ? totalCols_ : std::min(totalCols_, x0 + slice_);
-            }
-            if (task && x0 < x1) (*task)(x0, x1);
-            {
-                std::lock_guard<std::mutex> lk(mu_);
-                if (--remaining_ == 0) cvDone_.notify_one();
-            }
-        }
-    }
-
-    std::vector<std::thread> threads_;
-    std::mutex mu_;
-    std::condition_variable cvStart_, cvDone_;
-    std::function<void(int, int)>* task_ = nullptr;
-    int totalCols_ = 0, slice_ = 0, remaining_ = 0;
-    std::uint64_t generation_ = 0;
-    bool stop_ = false;
-};
-
-ColumnPool& columnPool() {
-    static ColumnPool pool;
-    return pool;
 }
 
 // Fast rational atan approximation for positive x (error < 0.004 rad).
@@ -460,7 +370,7 @@ void Camera::applyPose(const PlayerPose& p) {
     verticalSpeed_ = 0;
 }
 
-void Camera::render(const WorldMap& map, Screen& screen, const PlayerPose* other, double animationTime) const {
+void Camera::render(const WorldMap& map, Screen& screen, const PlayerPose* other, double animationTime, double horizonSway) const {
     const double posX = position_.x;
     const double posY = position_.y;
     const double dirX = forward_.x;
@@ -473,7 +383,7 @@ void Camera::render(const WorldMap& map, Screen& screen, const PlayerPose* other
     const size_t totalDepth = static_cast<size_t>(screenWidth) * screenHeight;
     if (wallDepth.size() != totalDepth) wallDepth.resize(totalDepth);
     const double eye = (initialized_ ? feet_ : map.at(int(posX),int(posY)).floor) + 0.5;
-    const double horizon = screenHeight * (0.5 + std::tan(pitch_));
+    const double horizon = screenHeight * (0.5 + std::tan(pitch_)) + horizonSway;
     const double invScreenHeight = 1.0 / screenHeight;
 
     // Precompute row inverse distances once per frame (replaces W*H divisions with H divisions).
@@ -485,6 +395,7 @@ void Camera::render(const WorldMap& map, Screen& screen, const PlayerPose* other
 
     const auto& fog = map.fog();
     const bool useFog = fog.enabled;
+    const double maxRayDist = useFog ? (static_cast<double>(fog.end) + 2.5) : 1e9;
     const bool hasSky = map.sky().enabled;
     const bool eldritchSky = map.sky().eldritch;
     double stormFlash = 0.0;
@@ -497,7 +408,7 @@ void Camera::render(const WorldMap& map, Screen& screen, const PlayerPose* other
     const SkyFrame skyFrame = hasSky ? prepareSkyFrame(animationTime, eldritchSky) : SkyFrame{};
     constexpr float kInf = std::numeric_limits<float>::infinity();
 
-    columnPool().parallelColumns(screenWidth, [&](int xBegin, int xEnd) {
+    sharedPool().parallelFor(screenWidth, 256, 32, [&](int xBegin, int xEnd) {
     for (int x = xBegin; x < xEnd; ++x) {
         // Initialize this column's depth buffer right before DDA so it stays 100% hot in L1D cache!
         float* const depthCol = wallDepth.data() + static_cast<size_t>(x) * screenHeight;
@@ -599,6 +510,7 @@ void Camera::render(const WorldMap& map, Screen& screen, const PlayerPose* other
                 }
             }
             if(next.wall) break;
+            if(end > maxRayDist) break;
         }
 
         if (hasSky && skyStop > 0) {
@@ -618,11 +530,12 @@ void Camera::render(const WorldMap& map, Screen& screen, const PlayerPose* other
     });
 
     const bool trackPropDepth = other || !map.swarms().empty() || !map.emitters().empty();
+    const double propCullDist = useFog ? (static_cast<double>(fog.end) + 8.0) : 1e9;
     visibleProps_.clear();
     for (const auto& prop : map.props()) {
         const vec2 offset = vec2(prop.x, prop.y) - position_;
         const double depth = offset * forward_;
-        if (depth > 0.01) visibleProps_.push_back({&prop, depth, offset * plane_ / (kPlaneWidth * kPlaneWidth)});
+        if (depth > 0.01 && depth < propCullDist) visibleProps_.push_back({&prop, depth, offset * plane_ / (kPlaneWidth * kPlaneWidth)});
     }
     std::stable_sort(visibleProps_.begin(), visibleProps_.end(), [](const VisibleProp& a, const VisibleProp& b) {
         return a.depth > b.depth;
@@ -703,9 +616,15 @@ void Camera::render(const WorldMap& map, Screen& screen, const PlayerPose* other
     const double tSafe = std::max(0.0, animationTime);
     for (size_t ei = 0; ei < map.emitters().size(); ++ei) {
         const auto& e = map.emitters()[ei];
-        // Frustum back-plane sphere cull: skip entire emitter behind the camera in O(1).
-        const double centerDepth = (e.x - posX) * dirX + (e.y - posY) * dirY;
-        if (centerDepth < -static_cast<double>(e.radius) - 0.5) continue;
+        // Frustum back-plane & fog-radius sphere cull: skip distant or behind-camera emitters in O(1).
+        const double dx = e.x - posX, dy = e.y - posY;
+        const double centerDepth = dx * dirX + dy * dirY;
+        const double rPad = static_cast<double>(e.radius) + 0.5;
+        if (centerDepth < -rPad) continue;
+        if (useFog) {
+            const double farLim = static_cast<double>(fog.end) + static_cast<double>(e.radius) + 6.0;
+            if (dx * dx + dy * dy > farLim * farLim) continue;
+        }
         const double zSpan = std::max(0.01, static_cast<double>(e.zMax - e.zMin));
         switch (e.kind) {
         case Emitter::Kind::Vortex: {

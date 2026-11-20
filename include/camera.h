@@ -16,7 +16,7 @@ public:
     void turn(double seconds);
     PlayerPose pose() const;
     void applyPose(const PlayerPose& pose);
-    void render(const WorldMap& map, Screen& screen, const PlayerPose* other = nullptr, double animationTime = 0) const;
+    void render(const WorldMap& map, Screen& screen, const PlayerPose* other = nullptr, double animationTime = 0, double horizonSway = 0.0) const;
 
 private:
     bool canOccupy(const WorldMap& map, double x, double y) const;

@@ -93,6 +93,7 @@ tile g 1.4 0 15 1.0 9
 
 ; Player spawns on the South Arrival Pier facing North toward Cthulhu & the Eclipsed Black Sun
 spawn 22.5 39.5 0 -1
+beacon 22.5 19.0
 
 ; HERO CENTERPIECE: Colossal Cthulhu Awakening on the Sunken Altar
 prop 10 22.5 19.0 6.6 4.7 float 0.10 1.4 0.05

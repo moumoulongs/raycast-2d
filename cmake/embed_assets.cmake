@@ -1,0 +1,43 @@
+# Emit compact RLE-compressed numeric byte initializers (0xFF <count> <byte>).
+# Valid UTF-8 never contains byte 0xFF, so this is 100% lossless for all text assets.
+set(header "#pragma once\n#include <string_view>\n\ninline std::string_view embeddedAsset(std::string_view relativePath) {\n")
+set(rle_bytes "7e;23;2e;20;30;3d;38;36;34;61;62;63")
+foreach(asset IN LISTS asset_files)
+    file(RELATIVE_PATH key "${asset_root}" "${asset}")
+    string(REPLACE "\\" "\\\\" key "${key}")
+    string(REPLACE "\"" "\\\"" key "${key}")
+    file(READ "${asset}" hex HEX)
+    # Mark byte boundaries with ':' so regex never matches across half-bytes.
+    string(REGEX REPLACE "(..)" "\\1:" hex "${hex}")
+    # 0xFF is the run marker, so a literal 0xFF byte inside an asset would corrupt decoding.
+    string(REGEX MATCH "(^|:)ff:" literal_marker "${hex}")
+    if(NOT literal_marker STREQUAL "")
+        message(FATAL_ERROR "Asset '${key}' contains byte 0xFF, which collides with the RLE marker")
+    endif()
+    foreach(b IN LISTS rle_bytes)
+        set(r4 "${b}:${b}:${b}:${b}:")
+        set(r16 "${r4}${r4}${r4}${r4}")
+        set(r64 "${r16}${r16}${r16}${r16}")
+        # Run markers end with a doubled ':' so a following identical byte run cannot
+        # match the trailing byte of the marker itself (that would nest markers and
+        # corrupt the stream). The doubled separator is stripped after encoding.
+        string(REPLACE "${r64}" "ff:40:${b}::" hex "${hex}")
+        string(REPLACE "${r16}" "ff:10:${b}::" hex "${hex}")
+        string(REPLACE "${r4}" "ff:04:${b}::" hex "${hex}")
+    endforeach()
+    string(REPLACE "::" "" hex "${hex}")
+    string(REPLACE ":" "" hex "${hex}")
+    string(APPEND header "    if (relativePath == \"${key}\") {\n")
+    string(APPEND header "        static constexpr unsigned char bytes[] = {\n")
+    string(LENGTH "${hex}" hex_length)
+    set(offset 0)
+    while(offset LESS hex_length)
+        string(SUBSTRING "${hex}" ${offset} 64 line)
+        string(REGEX REPLACE "(..)" "0x\\1," line "${line}")
+        string(APPEND header "            ${line}\n")
+        math(EXPR offset "${offset} + 64")
+    endwhile()
+    string(APPEND header "            0};\n        return {reinterpret_cast<const char*>(bytes), sizeof(bytes) - 1};\n    }\n")
+endforeach()
+string(APPEND header "    return {};\n}\n")
+file(GENERATE OUTPUT "${generated_dir}/embedded_assets.h" CONTENT "${header}")

@@ -86,6 +86,10 @@ public:
             case 'a': case 'A': state.strafe = 1; break;
             case 'd': case 'D': state.strafe = -1; break;
             case '\t': state.toggleMinimap = true; break;
+            case 'e': case 'E': state.interact = true; break;
+            case 'l': case 'L': state.toggleLang = true; break;
+            case '1': state.choice1 = true; break;
+            case '2': state.choice2 = true; break;
             case 'h': case 'H': state.toggleHud = true; break;
             case 'm': case 'M': state.toggleMenu = true; break;
             case '\r': case '\n': state.menuConfirm = true; break;

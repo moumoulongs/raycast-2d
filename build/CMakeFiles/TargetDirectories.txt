@@ -1,5 +1,0 @@
-D:/c_source/ascii/build/CMakeFiles/edit_cache.dir
-D:/c_source/ascii/build/CMakeFiles/rebuild_cache.dir
-D:/c_source/ascii/build/src/CMakeFiles/raycast-2d.dir
-D:/c_source/ascii/build/src/CMakeFiles/edit_cache.dir
-D:/c_source/ascii/build/src/CMakeFiles/rebuild_cache.dir

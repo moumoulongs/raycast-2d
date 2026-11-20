@@ -5,7 +5,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
-#include <fstream>
+#include "game_resource.h"
 #include <optional>
 #include <thread>
 #ifdef _WIN32
@@ -18,12 +18,54 @@
 
 namespace {
 #ifdef _WIN32
-struct TimerResolutionGuard {
-    TimerResolutionGuard() { timeBeginPeriod(1); }
-    ~TimerResolutionGuard() { timeEndPeriod(1); }
+struct HighResPacer {
+    HANDLE timer = nullptr;
+    HighResPacer() {
+        timeBeginPeriod(1);
+#ifdef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+        timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+#endif
+    }
+    ~HighResPacer() {
+        if (timer) CloseHandle(timer);
+        timeEndPeriod(1);
+    }
+    void waitUntil(std::chrono::steady_clock::time_point deadline) const {
+        using Clock = std::chrono::steady_clock;
+        for (;;) {
+            const auto now = Clock::now();
+            if (now >= deadline) return;
+            const auto remUs = std::chrono::duration_cast<std::chrono::microseconds>(deadline - now).count();
+            if (timer && remUs > 400) {
+                LARGE_INTEGER due{};
+                // Leave ~300us headroom for sub-millisecond spin finish.
+                due.QuadPart = -static_cast<LONGLONG>(remUs - 300) * 10;
+                if (SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+                    WaitForSingleObject(timer, 50);
+                    continue;
+                }
+            } else if (!timer && remUs > 1350) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            YieldProcessor();
+        }
+    }
 };
 #else
-struct TimerResolutionGuard {};
+struct HighResPacer {
+    void waitUntil(std::chrono::steady_clock::time_point deadline) const {
+        using Clock = std::chrono::steady_clock;
+        for (;;) {
+            const auto now = Clock::now();
+            if (now >= deadline) return;
+            if (deadline - now > std::chrono::microseconds(1350))
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            else
+                std::this_thread::yield();
+        }
+    }
+};
 #endif
 constexpr unsigned defaultPort=27015;
 bool parsePort(const std::string& s,unsigned& port){
@@ -34,13 +76,17 @@ std::uint64_t hashResources(const std::filesystem::path& map, const std::filesys
     std::uint64_t hash = 14695981039346656037ULL;
     auto add = [&](unsigned char c) { hash = (hash ^ c) * 1099511628211ULL; };
     for (const auto& path : {map, atlas}) {
-        std::ifstream in(path, std::ios::binary);
-        if (!in) return 0;
-        std::string line;
-        while (std::getline(in, line)) {
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            for (unsigned char c : line) add(c);
+        std::string data;
+        if (!readGameResource(path, data)) return 0;
+        std::size_t pos = 0;
+        while (pos < data.size()) {
+            const std::size_t nl = data.find('\n', pos);
+            std::size_t end = (nl == std::string::npos) ? data.size() : nl;
+            if (end > pos && data[end - 1] == '\r') --end;
+            for (std::size_t i = pos; i < end; ++i) add(static_cast<unsigned char>(data[i]));
             add('\n');
+            if (nl == std::string::npos) break;
+            pos = nl + 1;
         }
         add(0);
     }
@@ -65,25 +111,34 @@ std::string command(NetSession& net,const std::string& line,const std::string& m
 }
 }
 App::App(std::unique_ptr<Platform> platform, WorldMap map,std::uint64_t fingerprint,std::string mapName,
-         std::vector<RealmEntry> realms, int activeRealm)
+         std::vector<RealmEntry> realms, int activeRealm, int fpsCap, std::filesystem::path assetDir)
     : platform_(std::move(platform)),worldMap_(std::move(map)),camera_(worldMap_.spawnPosition(),worldMap_.spawnDirection()),
       screen_(platform_->width(),platform_->height()), fingerprint_(fingerprint),mapName_(std::move(mapName)),
-      realms_(std::move(realms)), activeRealm_(activeRealm) {}
+      realms_(std::move(realms)), activeRealm_(activeRealm), fpsCap_(fpsCap), assetDir_(std::move(assetDir)) {}
 
 int App::run() {
     using Clock=std::chrono::steady_clock;
-    constexpr auto kFrameBudget = std::chrono::microseconds(2000); // Locked 500 FPS (2.000 ms/frame)
-    TimerResolutionGuard timerGuard;
+    const auto frameBudget = fpsCap_ > 0 ? std::chrono::microseconds(1000000 / fpsCap_) : std::chrono::microseconds(0);
+    HighResPacer pacer;
     auto animationStart=Clock::now();
     auto previous=animationStart;
     auto nextFrame=animationStart;
-    NetSession net; ConsoleUi console; HudUi hud(realms_, activeRealm_); Camera guest; NetInput held{}; bool hadPeer=false, wasClient=false;
+    NetSession net; ConsoleUi console; HudUi hud(realms_, activeRealm_); StoryRuntime story; Camera guest; NetInput held{}; bool hadPeer=false, wasClient=false;
+    auto loadStoryForCurrentMap = [&] {
+        story.reset();
+        if (!worldMap_.storyFile().empty() && !assetDir_.empty()) {
+            story.load(assetDir_ / std::filesystem::u8path(worldMap_.storyFile()));
+        }
+    };
+    loadStoryForCurrentMap();
     std::optional<PlayerPose> other;
     auto fresh=[&]{return Camera(worldMap_.spawnPosition(),worldMap_.spawnDirection());};
     double sceneTime=0;
-    double displayedFps = 500.0;
+    double displayedFps = fpsCap_ > 0 ? static_cast<double>(fpsCap_) : 0.0;
     double fpsWindowTime = 0.0;
     int fpsWindowFrames = 0;
+    double renderMsSum = 0.0, presentMsSum = 0.0;
+    double displayedRenderMs = 0.0, displayedPresentMs = 0.0;
     double netSendAccum = 0.0;
     for (;;) {
         auto start=Clock::now();
@@ -94,7 +149,11 @@ int App::run() {
         ++fpsWindowFrames;
         if (fpsWindowTime >= 0.25) {
             displayedFps = fpsWindowFrames / fpsWindowTime;
+            displayedRenderMs = renderMsSum / fpsWindowFrames;
+            displayedPresentMs = presentMsSum / fpsWindowFrames;
             fpsWindowTime = 0.0;
+            renderMsSum = 0.0;
+            presentMsSum = 0.0;
             fpsWindowFrames = 0;
         }
 
@@ -117,6 +176,7 @@ int App::run() {
                 mapName_ = realm.mapPath.filename().u8string();
                 fingerprint_ = hashResources(realm.mapPath, realm.atlasPath);
                 activeRealm_ = hudAct.switchRealmIndex;
+                loadStoryForCurrentMap();
                 animationStart = Clock::now();
                 sceneTime = 0;
             } catch (const std::exception& e) {
@@ -128,8 +188,13 @@ int App::run() {
         const bool peer=net.connected();
         if(!peer || !hadPeer) {other.reset();held={};netSendAccum=0.0;}
         if(wasClient&&!net.isClient()) camera_=fresh();
+        if (!input.consoleActive && !hud.blocksMovement()) {
+            story.update(input, worldMap_, camera_.pose(), dt);
+        } else if (input.toggleLang) {
+            story.toggleLanguage();
+        }
         NetInput mine{};
-        if(!input.consoleConsumed && !input.consoleActive && !hud.blocksMovement()) {
+        if(!input.consoleConsumed && !input.consoleActive && !hud.blocksMovement() && !story.blocksMovement()) {
             mine={input.move,input.strafe,input.mouseX,input.mouseY,input.jump};
         }
         if(!(net.isClient() && peer)){sceneTime=std::chrono::duration<double>(start-animationStart).count();worldMap_.animate(sceneTime);}
@@ -150,31 +215,21 @@ int App::run() {
             }
         }
         wasClient=net.isClient();hadPeer=peer;
+        const auto tRender0 = Clock::now();
         screen_.clear();
-        camera_.render(worldMap_,screen_,other?&*other:nullptr,sceneTime);
+        camera_.render(worldMap_,screen_,other?&*other:nullptr,sceneTime,story.horizonSway(sceneTime));
         if(input.consoleActive) console.draw(screen_);
-        else hud.draw(screen_, worldMap_, camera_.pose(), mapName_, sceneTime, displayedFps, input.mouseLocked, peer);
+        else hud.draw(screen_, worldMap_, camera_.pose(), mapName_, sceneTime, displayedFps, input.mouseLocked, peer, displayedRenderMs, displayedPresentMs, &story);
+        const auto tPresent0 = Clock::now();
         platform_->present(screen_);
+        const auto tPresent1 = Clock::now();
+        renderMsSum += std::chrono::duration<double, std::milli>(tPresent0 - tRender0).count();
+        presentMsSum += std::chrono::duration<double, std::milli>(tPresent1 - tPresent0).count();
 
-        // High-precision hybrid sleep+spin 500 FPS frame pacer (avoids 15.6ms Windows sleep jitter).
-        nextFrame += kFrameBudget;
-        auto now = Clock::now();
-        if (now > nextFrame) {
-            nextFrame = now;
-        } else {
-            while (true) {
-                now = Clock::now();
-                if (now >= nextFrame) break;
-                if (nextFrame - now > std::chrono::microseconds(1350)) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                } else {
-#ifdef _WIN32
-                    YieldProcessor();
-#else
-                    std::this_thread::yield();
-#endif
-                }
-            }
+        if (fpsCap_ > 0) {
+            nextFrame += frameBudget;
+            if (tPresent1 > nextFrame) nextFrame = tPresent1;
+            else pacer.waitUntil(nextFrame);
         }
     }
     return 0;

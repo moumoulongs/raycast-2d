@@ -272,9 +272,8 @@ void HudUi::drawCompass(Screen& screen, const WorldMap& map, const PlayerPose& p
     const int cx0 = (sw - cw) / 2;
     drawBox(screen, cx0, 0, cw, ch, s.padX, s.padY, 6, 0);
 
-    const double targetX = map.gridWidth() * 0.5;
-    const double targetY = map.gridHeight() * 0.43;
-    const double toTarget = std::atan2(targetY - pose.y, targetX - pose.x);
+    const vec2 beacon = map.beaconPosition();
+    const double toTarget = std::atan2(beacon.y - pose.y, beacon.x - pose.x);
     const double fovSpan = 1.65;
 
     const int innerX = cx0 + s.padX + s.pxW;
@@ -420,16 +419,17 @@ void HudUi::drawMinimap(Screen& screen, const WorldMap& map, const PlayerPose& p
 
 void HudUi::drawHud(Screen& screen, const WorldMap& map, const PlayerPose& pose,
                     const std::string& mapName, double sceneTime, double fps,
-                    bool mouseLocked, bool netConnected, const UiScale& s) const {
+                    bool mouseLocked, bool netConnected, double renderMs, double presentMs,
+                    const StoryRuntime* story, const UiScale& s) const {
     const int sw = screen.width();
     const int sh = screen.height();
 
     // 1. Top-Left Scaled Telemetry & Sanity Box
     if (sw >= 50 && sh >= 14) {
-        const int maxChars = 16;
+        const int maxChars = 19;
         const int bw = s.bitmap
-            ? std::min(sw * 28 / 100, maxChars * s.charAdv + s.padX * 2 + s.pxW * 2)
-            : std::min(30, sw / 3);
+            ? std::min(sw * 30 / 100, maxChars * s.charAdv + s.padX * 2 + s.pxW * 2)
+            : std::min(32, sw / 3);
         const int bh = s.bitmap
             ? (4 * s.lineAdv + s.padY * 2 + 2 * s.pxH)
             : 5;
@@ -439,15 +439,29 @@ void HudUi::drawHud(Screen& screen, const WorldMap& map, const PlayerPose& pose,
         const int usableChars = std::max(6, (bw - s.padX * 2 - (s.bitmap ? s.pxW * 2 : 2)) / s.charAdv);
         const std::string title = upperTitle(mapName);
 
-        const double lookNorth = std::max(0.0, -std::sin(pose.yaw));
-        const double dread = map.sky().eldritch
-            ? (18.0 * lookNorth + 10.0 * (0.5 + 0.5 * std::sin(sceneTime * 1.3)) + (pose.feet > 0.7 ? 12.0 : 0.0))
-            : 4.0;
-        const int sanPct = static_cast<int>(std::clamp(sanity_ - dread, 18.0, 100.0));
-        const unsigned char sanCol = sanPct < 65 ? 9 : (sanPct < 82 ? 13 : 10);
+        int sanPct = 100;
+        if (story && story->loaded()) {
+            sanPct = static_cast<int>(std::clamp(story->sanity(), 0.0f, 100.0f));
+        } else {
+            const vec2 beacon = map.beaconPosition();
+            const double toBeacon = std::atan2(beacon.y - pose.y, beacon.x - pose.x);
+            const double lookAtBeacon = std::max(0.0, std::cos(wrapPi(toBeacon - pose.yaw)));
+            const double dread = map.sky().eldritch
+                ? (18.0 * lookAtBeacon + 10.0 * (0.5 + 0.5 * std::sin(sceneTime * 1.3)) + (pose.feet > 0.7 ? 12.0 : 0.0))
+                : 4.0;
+            sanPct = static_cast<int>(std::clamp(sanity_ - dread, 18.0, 100.0));
+        }
+        const unsigned char sanCol = sanPct < 45 ? 9 : (sanPct < 75 ? 13 : 10);
 
         char fpsLine[64];
-        std::snprintf(fpsLine, sizeof(fpsLine), "FPS %4.0f %s", std::clamp(fps, 0.0, 9999.0), netConnected ? "NET" : "SOLO");
+        if (renderMs > 0.0 || presentMs > 0.0) {
+            std::snprintf(fpsLine, sizeof(fpsLine), "FPS%4.0f R%.1f P%.1f",
+                          std::clamp(fps, 0.0, 9999.0),
+                          std::clamp(renderMs, 0.0, 99.9),
+                          std::clamp(presentMs, 0.0, 99.9));
+        } else {
+            std::snprintf(fpsLine, sizeof(fpsLine), "FPS %4.0f %s", std::clamp(fps, 0.0, 9999.0), netConnected ? "NET" : "SOLO");
+        }
         char posLine[64];
         std::snprintf(posLine, sizeof(posLine), "%4.1f,%4.1f Z%+3.1f", pose.x, pose.y, pose.feet);
 
@@ -514,8 +528,8 @@ void HudUi::drawHud(Screen& screen, const WorldMap& map, const PlayerPose& pose,
         drawTextScaled(screen, s.padX, textY, mouseTag, mouseLocked ? 10 : 11, s.pxW, s.pxH, s.bitmap);
 
         const std::string hints = s.bitmap
-            ? "WASD MOVE  SPC JUMP  TAB MAP  H HUD  M REALM  ESC MENU  Q QUIT"
-            : "[WASD] Move  [SPACE] Jump  [TAB] Radar  [H] HUD  [M] Realms  [~] Console  [ESC] Menu  [Q] Quit";
+            ? "WASD MOVE  E ACT  L ZH/EN  TAB MAP  H HUD  M REALM  ESC MENU"
+            : "[WASD] Move  [E] Act  [L] ZH/EN  [TAB] Radar  [H] HUD  [M] Realms  [ESC] Menu  [Q] Quit";
         const int hintX = s.padX + (tagChars + 2) * s.charAdv;
         if (hintX + 4 * s.charAdv < sw) {
             const int availChars = (sw - hintX - s.padX) / s.charAdv;
@@ -655,12 +669,127 @@ void HudUi::drawOverlay(Screen& screen, double sceneTime, const UiScale& s) cons
     }
 }
 
+void HudUi::drawStoryUi(Screen& screen, const StoryRuntime& story, double sceneTime, const UiScale& s) const {
+    const int sw = screen.width();
+    const int sh = screen.height();
+    const bool zh = story.isZh();
+    const bool pulse = std::sin(sceneTime * 3.5) > 0.0;
+
+    // 1. Top-Center Bilingual Objective Banner (below compass)
+    const std::string obj = story.objectiveLabel();
+    if (!obj.empty() && !story.showingEnding()) {
+        const int ch = s.bitmap ? (5 * s.pxH + s.padY * 2 + 2 * s.pxH) : 3;
+        const int ow = std::min(sw - 8, std::max(48, sw * 46 / 100));
+        const int ox = (sw - ow) / 2;
+        const int oy = ch + 1;
+        const int oh = s.bitmap ? std::max(7, s.lineAdv + 3) : 3;
+        drawBox(screen, ox, oy, ow, oh, 1, 1, 6, 0);
+        screen.addOverlay(ox + 2, oy + 1, ow - 4, obj, 14, true, false, oh - 2);
+    }
+
+    // 2. Ending Card Overlay
+    if (story.showingEnding()) {
+        const int bw = std::clamp(sw * 68 / 100, 52, sw - 4);
+        const int bh = std::clamp(sh * 58 / 100, 20, sh - 4);
+        const int bx = (sw - bw) / 2;
+        const int by = (sh - bh) / 2;
+        const std::uint8_t endId = story.ending();
+        const unsigned char borderCol = endId == 1 ? 14 : (endId == 2 ? 9 : 13);
+        drawBox(screen, bx, by, bw, bh, s.padX, s.padY, borderCol, 0);
+
+        std::string title, sub1, sub2, hint;
+        if (endId == 1) {
+            title = zh ? "结局 A：永夜守灯人" : "ENDING A: KEEPER OF THE DROWNED LIGHT";
+            sub1 = zh ? "三枚旧印齐燃，黑日竖瞳在星光下缓缓闭合。沉没之城重归海底寂静。"
+                      : "All three Elder Seals blaze. The Black Sun closes, and R'lyeh sinks back into silence.";
+            sub2 = zh ? "你守住了孤礁上的最后一盏灯——直到百年后的下一次退潮。"
+                      : "You kept the final lantern burning on Blackreef—until the next century's low tide.";
+        } else if (endId == 2) {
+            title = zh ? "结局 B：黑星目击者" : "ENDING B: WITNESS OF THE BLACK STAR";
+            sub1 = zh ? "破碎的理智终于拼出真相：灯塔从不是为了驱离船只，而是召唤祂归航的信标。"
+                      : "Through fractured sanity, the truth dawns: the lighthouse was never a warning—it was a summoning.";
+            sub2 = zh ? "血雷撕裂星穹，深渊巨像睁开双眼，你成为新纪元的第一位见证者。"
+                      : "Crimson lightning tears the vault. The Sleeper wakes, and you are His first witness.";
+        } else {
+            title = zh ? "隐藏结局 C：深渊同行" : "SECRET ENDING C: INTO THE STAR-GATE";
+            sub1 = zh ? "你读懂了藏在礁后的无署名忏悔，宽恕了困于管风琴中的苍白残影。"
+                      : "Having uncovered the unsigned confession and forgiven the pale echo in the choir, you step into the Star-Gate.";
+            sub2 = zh ? "星门闭合之际，孤礁灯塔重现温暖微光；这一次，由你接过那盏永不熄灭的灯。"
+                      : "As the rift seals, Blackreef shines warm once more—now you carry that undying vigil beyond the stars.";
+        }
+        hint = zh ? "[按 E / ENTER / SPACE 继续自由探索]   [L] 切换中英文"
+                  : "[PRESS E / ENTER / SPACE TO CONTINUE FREE ROAM]   [L] ZH/EN";
+
+        screen.addOverlay(bx + 4, by + bh * 14 / 100, bw - 8, title, borderCol, true, true, bh * 18 / 100);
+        screen.addOverlay(bx + 5, by + bh * 38 / 100, bw - 10, sub1, 15, true, false, bh * 18 / 100);
+        screen.addOverlay(bx + 5, by + bh * 58 / 100, bw - 10, sub2, 7, true, false, bh * 18 / 100);
+        screen.addOverlay(bx + 4, by + bh * 80 / 100, bw - 8, hint, pulse ? 11 : 10, true, false, bh * 14 / 100);
+        return;
+    }
+
+    // 3. Active Narrative Dialogue & Choice Box (with multi-line word wrapping!)
+    if (const auto* node = story.currentNode()) {
+        const int bw = std::clamp(sw * 76 / 100, 54, sw - 4);
+        const int bh = std::clamp(sh * 32 / 100, 14, sh - 6);
+        const int bx = (sw - bw) / 2;
+        const int by = sh - bh - (s.bitmap ? (5 * s.pxH + 3 * s.pxH) : 2);
+        drawBox(screen, bx, by, bw, bh, s.padX, s.padY, node->color, 0);
+
+        const std::string& speaker = zh ? node->speakerZh : node->speakerEn;
+        const int innerX = bx + s.padX + 3;
+        const int innerW = bw - (s.padX + 3) * 2;
+        screen.addOverlay(innerX, by + s.padY + 1, innerW,
+                          speaker.empty() ? (zh ? "深渊低语" : "WHISPER") : speaker,
+                          node->color, false, true, bh * 22 / 100);
+
+        const std::string fullText = story.currentText();
+        const std::string visibleText = fullText.substr(0, story.revealedBytes());
+        const bool showChoices = story.hasChoicesOnCurrentPage() && story.pageFullyRevealed();
+        const int bodyY = by + bh * 28 / 100;
+        const int bodyH = showChoices ? (bh * 30 / 100) : (bh * 48 / 100);
+        screen.addOverlay(innerX, bodyY, innerW, visibleText, 15, false, false, std::max(4, bodyH));
+
+        if (showChoices) {
+            const int c0Y = by + bh * 60 / 100;
+            const int c1Y = by + bh * 77 / 100;
+            const int cH = std::max(3, bh * 16 / 100);
+            for (std::size_t i = 0; i < node->choices.size() && i < 2; ++i) {
+                const bool sel = (story.choiceCursor() == i);
+                const std::string& ctxt = zh ? node->choices[i].textZh : node->choices[i].textEn;
+                const std::string line = (sel ? ">> [" : "   [") + std::to_string(i + 1) + "] " + ctxt;
+                screen.addOverlay(innerX + 1, i == 0 ? c0Y : c1Y, innerW - 2, line,
+                                  sel ? 11 : 7, false, false, cH);
+            }
+        } else {
+            const std::string nextHint = story.pageFullyRevealed()
+                ? (zh ? "[E / ENTER] 继续   [L] 切换中英文" : "[E / ENTER] CONTINUE   [L] ZH/EN")
+                : (zh ? "[E / SPACE] 显示全部" : "[E / SPACE] REVEAL ALL");
+            screen.addOverlay(innerX, by + bh - s.padY - (s.bitmap ? 6 : 2),
+                              innerW, nextHint, pulse ? 14 : 8, true, false, 5);
+        }
+        return;
+    }
+
+    // 4. Nearby Interactable Prompt below crosshair
+    const std::string prompt = story.promptLabel();
+    if (!prompt.empty()) {
+        const int pw = std::clamp(sw * 38 / 100, 34, sw - 8);
+        const int ph = s.bitmap ? std::max(8, s.lineAdv + 3) : 3;
+        const int px = (sw - pw) / 2;
+        const int py = std::min(sh - ph - 8, sh / 2 + (s.bitmap ? 8 : 3));
+        drawBox(screen, px, py, pw, ph, 1, 1, pulse ? 11 : 14, 0);
+        screen.addOverlay(px + 2, py + 1, pw - 4, prompt, pulse ? 11 : 15, true, false, ph - 2);
+    }
+}
+
 void HudUi::draw(Screen& screen, const WorldMap& map, const PlayerPose& pose,
                  const std::string& mapName, double sceneTime, double fps,
-                 bool mouseLocked, bool netConnected) const {
+                 bool mouseLocked, bool netConnected, double renderMs, double presentMs,
+                 const StoryRuntime* story) const {
     const UiScale s = computeScale(screen.width(), screen.height());
     if (mode_ == Mode::Playing && showHud_) {
-        drawHud(screen, map, pose, mapName, sceneTime, fps, mouseLocked, netConnected, s);
+        drawHud(screen, map, pose, mapName, sceneTime, fps, mouseLocked, netConnected, renderMs, presentMs, story, s);
+        if (story && story->loaded()) drawStoryUi(screen, *story, sceneTime, s);
     } else if (mode_ != Mode::Playing) {
         drawOverlay(screen, sceneTime, s);
     }

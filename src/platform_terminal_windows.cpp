@@ -1,6 +1,7 @@
 #ifdef _WIN32
 
 #include "platform.h"
+#include "thread_pool.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -52,6 +53,7 @@ public:
 
     ~Win32WindowPlatform() override {
         releaseMouse();
+        destroyUiFonts();
         destroyDib();
         if (hwnd_) DestroyWindow(hwnd_);
     }
@@ -92,6 +94,10 @@ public:
         s.toggleHud = toggleHud_;
         s.toggleMinimap = toggleMinimap_;
         s.toggleMenu = toggleMenu_;
+        s.toggleLang = toggleLang_;
+        s.interact = interact_;
+        s.choice1 = choice1_;
+        s.choice2 = choice2_;
         s.menuUp = menuUp_;
         s.menuDown = menuDown_;
         s.menuConfirm = menuConfirm_;
@@ -116,11 +122,10 @@ public:
         }
 
         const Screen::Cell* const src = screen.data();
+        const int srcStride = screen.stride();
         const int gw = glyphW_;
         const int gh = glyphH_;
         const int stride = pixelW_;
-        int dirtyMinX = cols, dirtyMaxX = -1;
-        int dirtyMinY = rows, dirtyMaxY = -1;
 
         auto blitCell = [&](std::uint32_t* dst, unsigned char ch, unsigned char color) {
             if (ch <= 32 || ch > 126) {
@@ -175,25 +180,86 @@ public:
             }
         };
 
-        for (int y = 0; y < rows; ++y) {
-            const Screen::Cell* const srcRow = src + static_cast<std::size_t>(y) * sw;
-            std::uint16_t* const prvRow = prevCells_.data() + static_cast<std::size_t>(y) * cols;
-            std::uint32_t* const dstBand = dibPixels_ + static_cast<std::size_t>(y * gh) * stride;
-            int rowMinX = -1, rowMaxX = -1;
-            for (int x = 0; x < cols; ++x) {
-                const Screen::Cell cell = srcRow[x];
-                const std::uint16_t packed = packCell(cell);
-                if (packed == prvRow[x]) continue;
-                prvRow[x] = packed;
-                if (rowMinX < 0) rowMinX = x;
-                rowMaxX = x;
-                blitCell(dstBand + x * gw, static_cast<unsigned char>(cell.glyph), cell.color);
+        if (static_cast<int>(rowDirtyMin_.size()) < rows) {
+            rowDirtyMin_.resize(static_cast<std::size_t>(rows));
+            rowDirtyMax_.resize(static_cast<std::size_t>(rows));
+        }
+
+        // Parallel row-band DIBSection blitting: each worker writes disjoint horizontal bands.
+        sharedPool().parallelFor(rows, 96, 8, [&](int yBegin, int yEnd) {
+            for (int y = yBegin; y < yEnd; ++y) {
+                const Screen::Cell* const srcRow = src + static_cast<std::size_t>(y) * srcStride;
+                std::uint16_t* const prvRow = prevCells_.data() + static_cast<std::size_t>(y) * cols;
+                std::uint32_t* const dstBand = dibPixels_ + static_cast<std::size_t>(y * gh) * stride;
+                int rowMinX = -1, rowMaxX = -1;
+                for (int x = 0; x < cols; ++x) {
+                    const Screen::Cell cell = srcRow[x];
+                    const std::uint16_t packed = packCell(cell);
+                    if (packed == prvRow[x]) continue;
+                    prvRow[x] = packed;
+                    if (rowMinX < 0) rowMinX = x;
+                    rowMaxX = x;
+                    blitCell(dstBand + x * gw, static_cast<unsigned char>(cell.glyph), cell.color);
+                }
+                rowDirtyMin_[static_cast<std::size_t>(y)] = rowMinX;
+                rowDirtyMax_[static_cast<std::size_t>(y)] = rowMaxX;
             }
-            if (rowMinX >= 0) {
+        });
+
+        int dirtyMinX = cols, dirtyMaxX = -1;
+        int dirtyMinY = rows, dirtyMaxY = -1;
+        for (int y = 0; y < rows; ++y) {
+            const int rMin = rowDirtyMin_[static_cast<std::size_t>(y)];
+            if (rMin >= 0) {
                 if (y < dirtyMinY) dirtyMinY = y;
                 dirtyMaxY = y;
-                if (rowMinX < dirtyMinX) dirtyMinX = rowMinX;
-                if (rowMaxX > dirtyMaxX) dirtyMaxX = rowMaxX;
+                if (rMin < dirtyMinX) dirtyMinX = rMin;
+                const int rMax = rowDirtyMax_[static_cast<std::size_t>(y)];
+                if (rMax > dirtyMaxX) dirtyMaxX = rMax;
+            }
+        }
+
+        // Draw crisp UTF-8 (Chinese + English) UI overlays directly onto memDc_ before BitBlt!
+        const auto& overlays = screen.overlays();
+        if (!overlays.empty()) {
+            ensureUiFonts();
+            SetBkMode(memDc_, TRANSPARENT);
+            for (const auto& ov : overlays) {
+                if (ov.utf8.empty()) continue;
+                const int wlen = MultiByteToWideChar(CP_UTF8, 0, ov.utf8.data(), static_cast<int>(ov.utf8.size()), nullptr, 0);
+                if (wlen <= 0) continue;
+                wideBuf_.resize(static_cast<std::size_t>(wlen));
+                MultiByteToWideChar(CP_UTF8, 0, ov.utf8.data(), static_cast<int>(ov.utf8.size()), wideBuf_.data(), wlen);
+
+                HFONT font = ov.large ? uiLargeFont_ : uiFont_;
+                if (font) SelectObject(memDc_, font);
+                const std::uint32_t rgb = kPalette[ov.color < 17 ? ov.color : 16];
+                SetTextColor(memDc_, RGB((rgb >> 16) & 0xFFu, (rgb >> 8) & 0xFFu, rgb & 0xFFu));
+
+                const int px0 = std::clamp(ov.cellX * gw, 0, pixelW_);
+                const int py0 = std::clamp(ov.cellY * gh, 0, pixelH_);
+                const int pw = ov.cellW > 0 ? std::min(ov.cellW * gw, pixelW_ - px0) : (pixelW_ - px0);
+                const int linePx = ov.large ? uiLargePx_ : uiFontPx_;
+                const bool multiLine = (ov.cellH > 0);
+                const int boxH = multiLine ? std::max(linePx + 8, ov.cellH * gh) : (linePx + 8);
+                RECT rc{px0, py0, px0 + pw, std::min(pixelH_, py0 + boxH)};
+                UINT fmt = DT_NOPREFIX | (ov.centered ? DT_CENTER : DT_LEFT) |
+                           (multiLine ? (DT_WORDBREAK | DT_EDITCONTROL) : (DT_SINGLELINE | DT_VCENTER));
+                DrawTextW(memDc_, wideBuf_.data(), wlen, &rc, fmt);
+
+                // Expand dirty Blt bounds and invalidate prevCells_ under text so next frame restores cleanly.
+                const int cy0 = std::clamp<int>(static_cast<int>(rc.top) / gh, 0, rows - 1);
+                const int cy1 = std::clamp<int>((static_cast<int>(rc.bottom) + gh - 1) / gh, 0, rows - 1);
+                const int cx0 = std::clamp<int>(static_cast<int>(rc.left) / gw, 0, cols - 1);
+                const int cx1 = std::clamp<int>((static_cast<int>(rc.right) + gw - 1) / gw, 0, cols - 1);
+                if (cy0 < dirtyMinY) dirtyMinY = cy0;
+                if (cy1 > dirtyMaxY) dirtyMaxY = cy1;
+                if (cx0 < dirtyMinX) dirtyMinX = cx0;
+                if (cx1 > dirtyMaxX) dirtyMaxX = cx1;
+                for (int ry = cy0; ry <= cy1; ++ry) {
+                    std::uint16_t* pRow = prevCells_.data() + static_cast<std::size_t>(ry) * cols;
+                    std::fill(pRow + cx0, pRow + cx1 + 1, static_cast<std::uint16_t>(0xFFFFu));
+                }
             }
         }
 
@@ -307,6 +373,10 @@ private:
             case VK_DOWN: if (down) menuDown_ = true; return 0;
             case VK_RETURN: if (down && !repeat) menuConfirm_ = true; return 0;
             case VK_TAB: if (down && !repeat) toggleMinimap_ = true; return 0;
+            case 'E': if (down && !repeat) interact_ = true; return 0;
+            case 'L': if (down && !repeat) toggleLang_ = true; return 0;
+            case '1': if (down && !repeat) choice1_ = true; return 0;
+            case '2': if (down && !repeat) choice2_ = true; return 0;
             case 'H': if (down && !repeat) toggleHud_ = true; return 0;
             case 'M': if (down && !repeat) { releaseMouse(); toggleMenu_ = true; } return 0;
             case VK_ESCAPE:
@@ -332,7 +402,8 @@ private:
         consoleToggled_ = false;
         consoleKeys_.clear();
         std::fill_n(pressed_, 5, false);
-        toggleHud_ = toggleMinimap_ = toggleMenu_ = false;
+        toggleHud_ = toggleMinimap_ = toggleMenu_ = toggleLang_ = false;
+        interact_ = choice1_ = choice2_ = false;
         menuUp_ = menuDown_ = menuConfirm_ = false;
     }
 
@@ -473,6 +544,26 @@ private:
         prevCols_ = prevRows_ = 0;
     }
 
+    void ensureUiFonts() {
+        const int wantPx = std::clamp(pixelH_ / 38, 15, 28);
+        const int wantLarge = std::clamp(pixelH_ / 22, 22, 44);
+        if (uiFont_ && uiFontPx_ == wantPx && uiLargePx_ == wantLarge) return;
+        destroyUiFonts();
+        uiFontPx_ = wantPx;
+        uiLargePx_ = wantLarge;
+        uiFont_ = CreateFontW(-uiFontPx_, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                              CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
+        uiLargeFont_ = CreateFontW(-uiLargePx_, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                   DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                   CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
+    }
+
+    void destroyUiFonts() {
+        if (uiFont_) { DeleteObject(uiFont_); uiFont_ = nullptr; }
+        if (uiLargeFont_) { DeleteObject(uiLargeFont_); uiLargeFont_ = nullptr; }
+    }
+
     void destroyDib() {
         if (memDc_) {
             if (oldDib_) SelectObject(memDc_, oldDib_);
@@ -524,6 +615,11 @@ private:
 
     std::vector<std::uint8_t> glyphMasks_;
     std::vector<std::uint16_t> prevCells_;
+    std::vector<int> rowDirtyMin_, rowDirtyMax_;
+    std::vector<wchar_t> wideBuf_;
+    HFONT uiFont_ = nullptr;
+    HFONT uiLargeFont_ = nullptr;
+    int uiFontPx_ = 0, uiLargePx_ = 0;
     int prevCols_ = 0, prevRows_ = 0;
 
     bool fullscreen_ = false;
@@ -539,7 +635,8 @@ private:
     bool held_[5]{};
     bool pressed_[5]{};
     bool quit_ = false;
-    bool toggleHud_ = false, toggleMinimap_ = false, toggleMenu_ = false;
+    bool toggleHud_ = false, toggleMinimap_ = false, toggleMenu_ = false, toggleLang_ = false;
+    bool interact_ = false, choice1_ = false, choice2_ = false;
     bool menuUp_ = false, menuDown_ = false, menuConfirm_ = false;
 };
 

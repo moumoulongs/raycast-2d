@@ -5,12 +5,14 @@
 Screen::Screen(int width, int height)
     : width_(std::max(1, width)),
       height_(std::max(1, height)),
-      canvas_(static_cast<std::size_t>(width_) * height_) {
+      stride_((width_ + 31) & ~31),
+      canvas_(static_cast<std::size_t>(stride_) * height_) {
     clear();
 }
 
 void Screen::clear() {
     std::fill(canvas_.begin(), canvas_.end(), Cell{' ', DefaultColor});
+    overlays_.clear();
 }
 
 void Screen::resize(int width, int height) {
@@ -19,7 +21,8 @@ void Screen::resize(int width, int height) {
     if (w == width_ && h == height_) return;
     width_ = w;
     height_ = h;
-    canvas_.assign(static_cast<std::size_t>(width_) * height_, Cell{' ', DefaultColor});
+    stride_ = (width_ + 31) & ~31;
+    canvas_.assign(static_cast<std::size_t>(stride_) * height_, Cell{' ', DefaultColor});
 }
 
 Screen::Cell Screen::framedCell(int x, int y) const {
@@ -27,7 +30,7 @@ Screen::Cell Screen::framedCell(int x, int y) const {
     const bool side = x == 0 || x == width_ + 1;
     const bool end = y == 0 || y == height_ + 1;
     if (side || end) return {side && end ? '+' : '@', DefaultColor};
-    return canvas_[static_cast<std::size_t>(y - 1) * width_ + x - 1];
+    return canvas_[static_cast<std::size_t>(y - 1) * stride_ + x - 1];
 }
 
 std::string Screen::toDisplayString() const {

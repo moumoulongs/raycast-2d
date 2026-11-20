@@ -8,12 +8,14 @@
 #include "hud_ui.h"
 #include "platform.h"
 #include "screen.h"
+#include "story_runtime.h"
 #include "world_map.h"
 
 class App {
 public:
     explicit App(std::unique_ptr<Platform> platform, WorldMap map, std::uint64_t fingerprint,
-                 std::string mapName, std::vector<RealmEntry> realms = {}, int activeRealm = 0);
+                 std::string mapName, std::vector<RealmEntry> realms = {}, int activeRealm = 0,
+                 int fpsCap = 500, std::filesystem::path assetDir = {});
 
     int run();
 
@@ -26,4 +28,6 @@ private:
     std::string mapName_;
     std::vector<RealmEntry> realms_;
     int activeRealm_ = 0;
+    int fpsCap_ = 500;
+    std::filesystem::path assetDir_;
 };

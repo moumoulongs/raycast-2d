@@ -18,6 +18,10 @@ struct InputState {
     bool toggleHud = false;
     bool toggleMinimap = false;
     bool toggleMenu = false;
+    bool toggleLang = false;
+    bool interact = false;
+    bool choice1 = false;
+    bool choice2 = false;
     bool menuUp = false;
     bool menuDown = false;
     bool menuConfirm = false;

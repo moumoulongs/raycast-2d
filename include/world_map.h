@@ -4,8 +4,8 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
-#include <iosfwd>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct Texel { char glyph; unsigned char color; };
@@ -55,6 +55,47 @@ static_assert(sizeof(Emitter) == 32, "Emitter must be exactly 32 bytes");
 struct SkyConfig { bool enabled = false; bool eldritch = false; };
 struct FogConfig { bool enabled = false; std::uint8_t color = 8; float start = 12.0f, end = 28.0f; };
 
+// Compact 32-byte seamless world atmosphere zone (2 per 64B cache line).
+struct MapZone {
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    float fogStart = 12.0f, fogEnd = 36.0f;
+    std::uint8_t skyMode = 0; // 0=none, 1=starry, 2=eldritch
+    std::uint8_t fogColor = 6;
+    std::uint8_t reqFlag = 0; // 0 = always active, 1..63 = requires bit (reqFlag-1)
+    std::uint8_t pad[5]{};
+};
+static_assert(sizeof(MapZone) == 32, "MapZone must be 32 bytes");
+
+// Compact 20-byte story-driven smooth gate / drawbridge.
+struct StoryGate {
+    float closedFloor = 2.0f, openFloor = 0.0f, currentT = 0.0f, speed = 1.0f;
+    std::uint8_t tileIdx = 0;
+    std::uint8_t reqFlag = 0; // 1..63
+    std::uint8_t pad[2]{};
+};
+static_assert(sizeof(StoryGate) == 20, "StoryGate must be 20 bytes");
+
+// Compact 24-byte world trigger (interactable relic/NPC or walk-in zone).
+struct MapTrigger {
+    float x = 0, y = 0, radius = 1.8f;
+    std::uint16_t eventIndex = 0;
+    std::uint8_t kind = 0;       // 0 = interact (E), 1 = enter (auto)
+    std::uint8_t reqFlag = 0;    // 0 = none, 1..63 = requires bit (reqFlag-1)
+    std::uint8_t forbidFlag = 0; // 0 = none, 1..63 = hidden once bit (forbidFlag-1) is set
+    std::uint8_t pad[7]{};
+};
+static_assert(sizeof(MapTrigger) == 24, "MapTrigger must be 24 bytes");
+
+// Compact 16-byte conditional compass objective beacon.
+struct MapBeacon {
+    float x = 0, y = 0;
+    std::uint8_t reqFlag = 0;
+    std::uint8_t hideFlag = 0;
+    std::uint8_t color = 9;
+    std::uint8_t pad[5]{};
+};
+static_assert(sizeof(MapBeacon) == 16, "MapBeacon must be 16 bytes");
+
 // Exact 16-byte Tile (4 tiles per 64-byte L1 cache line, zero wasted padding).
 // wall/surface/side store direct 1-based texture slots (0 = none), eliminating secondary indirection!
 struct Tile {
@@ -70,8 +111,9 @@ static_assert(sizeof(Tile) == 16, "Tile must be exactly 16 bytes");
 class WorldMap {
 public:
     WorldMap(const std::filesystem::path& mapFile,const std::filesystem::path& textureFile);
-    WorldMap(std::istream& map,std::istream& atlas,const std::filesystem::path& mapFile,const std::filesystem::path& textureFile);
+    WorldMap(std::string_view mapData,std::string_view atlasData,const std::filesystem::path& mapFile,const std::filesystem::path& textureFile);
     void animate(double seconds);
+    void updateStoryWorld(double dt, std::uint64_t flags, double playerX, double playerY, int skyOverride = 0);
     bool contains(int x,int y) const {
         return static_cast<unsigned>(x) < static_cast<unsigned>(gridWidth_) &&
                static_cast<unsigned>(y) < static_cast<unsigned>(gridHeight_);
@@ -99,6 +141,13 @@ public:
     const FogConfig& fog() const { return fog_; }
     vec2 spawnPosition() const { return start_; }
     vec2 spawnDirection() const { return direction_; }
+    vec2 beaconPosition() const { return hasBeacon_ ? beacon_ : vec2(gridWidth_ * 0.5, gridHeight_ * 0.5); }
+    bool hasBeacon() const { return hasBeacon_; }
+    const auto& zones() const { return zones_; }
+    const auto& gates() const { return gates_; }
+    const auto& triggers() const { return triggers_; }
+    const std::string& triggerEventName(std::uint16_t idx) const { return triggerEvents_[idx]; }
+    const std::string& storyFile() const { return storyFile_; }
 private:
     struct Lift { float low, high, period, offset; std::uint8_t tileIdx; };
     struct Wave { float low, high, period, offset; std::uint8_t tileIdx; };
@@ -111,9 +160,16 @@ private:
     std::vector<Wave> waves_;
     std::vector<Monolith> monoliths_;
     std::vector<Morph> morphs_;
-    SkyConfig sky_{};
-    FogConfig fog_{};
-    vec2 start_{}, direction_{};
+    std::vector<MapZone> zones_;
+    std::vector<StoryGate> gates_;
+    std::vector<MapTrigger> triggers_;
+    std::vector<std::string> triggerEvents_;
+    std::vector<MapBeacon> beacons_;
+    std::string storyFile_;
+    SkyConfig sky_{}, baseSky_{};
+    FogConfig fog_{}, baseFog_{};
+    vec2 start_{}, direction_{}, beacon_{};
+    bool hasBeacon_ = false;
     // Single contiguous texel arena across all textures (one allocation, maximal cache locality).
     std::vector<Texel> texelAtlas_;
     std::vector<WorldTexture> textures_; // slot 0 is empty sentinel; real textures are 1..255

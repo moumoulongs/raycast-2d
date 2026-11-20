@@ -1,0 +1,17 @@
+build/
+out/
+cmake-build-*/
+*.exe
+*.obj
+*.o
+*.pdb
+*.ilk
+*.dll
+*.so
+*.dylib
+
+.codex/
+.serena/
+.spec-workflow/
+
+.DS_Store

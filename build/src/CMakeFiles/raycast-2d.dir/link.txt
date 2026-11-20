@@ -1,3 +1,0 @@
-"C:\Program Files\CMake\bin\cmake.exe" -E rm -f CMakeFiles\raycast-2d.dir/objects.a
-D:\ITK\mingw64\bin\ar.exe qc CMakeFiles\raycast-2d.dir/objects.a @CMakeFiles\raycast-2d.dir\objects1.rsp
-D:\ITK\mingw64\bin\c++.exe -Wl,--whole-archive CMakeFiles\raycast-2d.dir/objects.a -Wl,--no-whole-archive -o ..\raycast-2d.exe -Wl,--out-implib,libraycast-2d.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\raycast-2d.dir\linkLibs.rsp

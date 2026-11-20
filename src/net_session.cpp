@@ -18,10 +18,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <deque>
-#include <iomanip>
-#include <locale>
-#include <sstream>
 #include <utility>
 
 namespace {
@@ -48,7 +47,27 @@ int writable(Socket s){pollfd f{s,POLLOUT,0}; return ::poll(&f,1,0);}
 void release(Socket& s){if(s!=invalid) closeSocket(std::exchange(s,invalid));}
 using Clock=std::chrono::steady_clock;
 std::string clean(std::string s,size_t limit){if(s.size()>limit)s.resize(limit); for(char& c:s) if(static_cast<unsigned char>(c)<32 || c==127)c=' '; return s;}
-bool pose(std::istream& in,PlayerPose& p){return (in>>p.x>>p.y>>p.feet>>p.yaw>>p.pitch) && std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.feet)&&std::isfinite(p.yaw)&&std::isfinite(p.pitch);}
+bool scanInt(const char*& p, int& out) {
+    while (*p == ' ' || *p == '\t') ++p;
+    if (!*p) return false;
+    char* end = nullptr;
+    const long v = std::strtol(p, &end, 10);
+    if (end == p || (*end != '\0' && *end != ' ' && *end != '\t')) return false;
+    p = end;
+    out = static_cast<int>(v);
+    return true;
+}
+bool scanDouble(const char*& p, double& out) {
+    while (*p == ' ' || *p == '\t') ++p;
+    if (!*p) return false;
+    char* end = nullptr;
+    const double v = std::strtod(p, &end);
+    if (end == p || (*end != '\0' && *end != ' ' && *end != '\t')) return false;
+    p = end;
+    out = v;
+    return true;
+}
+bool pose(const char*& p,PlayerPose& out){return scanDouble(p,out.x)&&scanDouble(p,out.y)&&scanDouble(p,out.feet)&&scanDouble(p,out.yaw)&&scanDouble(p,out.pitch)&&std::isfinite(out.x)&&std::isfinite(out.y)&&std::isfinite(out.feet)&&std::isfinite(out.yaw)&&std::isfinite(out.pitch);}
 }
 
 struct NetSession::Impl {
@@ -81,11 +100,11 @@ struct NetSession::Impl {
         const auto body=s.substr(2);
         if(s[0]=='N'){remote=clean(body,48);return true;}
         if(s[0]=='C'){message(remote+": "+clean(body,512));return true;}
-        std::istringstream in(body);in.imbue(std::locale::classic());
-        if(s[0]=='I' && listener!=invalid){NetInput v;int jump;
-            if(!(in>>v.forward>>v.strafe>>v.dx>>v.dy>>jump) || !in.eof() || (jump!=0 && jump!=1) || inputs.size()>=256)return false;
+        const char* cur = body.c_str();
+        if(s[0]=='I' && listener!=invalid){NetInput v;int jump=0;
+            if(!scanInt(cur,v.forward)||!scanInt(cur,v.strafe)||!scanInt(cur,v.dx)||!scanInt(cur,v.dy)||!scanInt(cur,jump)||*cur!='\0'||(jump!=0 && jump!=1)||inputs.size()>=256)return false;
             v.forward=std::clamp(v.forward,-1,1);v.strafe=std::clamp(v.strafe,-1,1);v.dx=std::clamp(v.dx,-32767,32767);v.dy=std::clamp(v.dy,-32767,32767);v.jump=jump!=0;inputs.push_back(v);return true;}
-        if(s[0]=='P' && listener==invalid && pose(in,a)&&pose(in,b)&&(in>>sceneTime)&&std::isfinite(sceneTime)&&sceneTime>=0&&in.eof()){poses=true;return true;}
+        if(s[0]=='P' && listener==invalid && pose(cur,a)&&pose(cur,b)&&scanDouble(cur,sceneTime)&&std::isfinite(sceneTime)&&sceneTime>=0&&*cur=='\0'){poses=true;return true;}
         return false;
     }
 };
@@ -147,5 +166,5 @@ void NetSession::say(std::string s){s=clean(std::move(s),512);if(connected()&&!s
 void NetSession::sendInput(const NetInput& v){if(isClient()&&connected())p->queue("I "+std::to_string(v.forward)+" "+std::to_string(v.strafe)+" "+std::to_string(v.dx)+" "+std::to_string(v.dy)+" "+(v.jump?"1":"0"));}
 bool NetSession::takeInput(NetInput& v){if(p->inputs.empty())return false;v=p->inputs.front();p->inputs.pop_front();return true;}
 double NetSession::sceneTime() const{return p->sceneTime;}
-void NetSession::sendPoses(const PlayerPose& a,const PlayerPose& b,double seconds){if(!isHost()||!connected())return;std::ostringstream out;out.imbue(std::locale::classic());out<<std::setprecision(17)<<"P";for(auto* v:{&a,&b})out<<' '<<v->x<<' '<<v->y<<' '<<v->feet<<' '<<v->yaw<<' '<<v->pitch;out<<' '<<seconds;p->queue(out.str());}
+void NetSession::sendPoses(const PlayerPose& a,const PlayerPose& b,double seconds){if(!isHost()||!connected())return;char buf[512];const int n=std::snprintf(buf,sizeof(buf),"P %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g",a.x,a.y,a.feet,a.yaw,a.pitch,b.x,b.y,b.feet,b.yaw,b.pitch,seconds);if(n>0&&static_cast<size_t>(n)<sizeof(buf))p->queue(std::string(buf,static_cast<size_t>(n)));}
 bool NetSession::takePoses(PlayerPose& a,PlayerPose& b){if(!p->poses)return false;a=p->a;b=p->b;p->poses=false;return true;}

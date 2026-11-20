@@ -3,6 +3,7 @@
 #include "input.h"
 #include "player_pose.h"
 #include "screen.h"
+#include "story_runtime.h"
 #include "world_map.h"
 #include <filesystem>
 #include <string>
@@ -32,7 +33,9 @@ public:
     HudAction update(const InputState& input, double dt);
     void draw(Screen& screen, const WorldMap& map, const PlayerPose& pose,
               const std::string& mapName, double sceneTime, double fps,
-              bool mouseLocked, bool netConnected) const;
+              bool mouseLocked, bool netConnected,
+              double renderMs = 0.0, double presentMs = 0.0,
+              const StoryRuntime* story = nullptr) const;
 
 private:
     struct UiScale {
@@ -50,7 +53,9 @@ private:
                         int pxW, int pxH, bool bitmap, int maxChars = -1) const;
     void drawHud(Screen& screen, const WorldMap& map, const PlayerPose& pose,
                  const std::string& mapName, double sceneTime, double fps,
-                 bool mouseLocked, bool netConnected, const UiScale& s) const;
+                 bool mouseLocked, bool netConnected, double renderMs, double presentMs,
+                 const StoryRuntime* story, const UiScale& s) const;
+    void drawStoryUi(Screen& screen, const StoryRuntime& story, double sceneTime, const UiScale& s) const;
     void drawCompass(Screen& screen, const WorldMap& map, const PlayerPose& pose, double sceneTime, const UiScale& s) const;
     void drawMinimap(Screen& screen, const WorldMap& map, const PlayerPose& pose, const UiScale& s) const;
     void drawOverlay(Screen& screen, double sceneTime, const UiScale& s) const;
